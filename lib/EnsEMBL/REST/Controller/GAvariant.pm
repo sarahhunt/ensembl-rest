@@ -59,17 +59,20 @@ sub get_request: Chained('/') PathPart('GAvariant') ActionClass('REST')  {
 
   $c->log->debug(Dumper $post_data);
 
+  ## not using these if token is supplied but required by spec, so check early
   unless (exists $post_data->{referenceName}){ $c->go( 'ReturnError', 'custom', [ ' Cannot find "referenceName" key in your request' ] ) };
   unless (exists $post_data->{start}){         $c->go( 'ReturnError', 'custom', [ ' Cannot find "start" key in your request' ] ) };
   unless (exists $post_data->{end}){           $c->go( 'ReturnError', 'custom', [ ' Cannot find "end" key in your request' ] ) };
 
 
-  my $gavariant ; 
+  my $gavariant;
+
   try {
     $gavariant = $c->model('GAvariant')->fetch_gavariant($post_data);
   } catch {
     $c->go('ReturnError', 'from_ensembl', [$_]);
   };
+
   $self->status_ok($c, entity => $gavariant);
 }
 

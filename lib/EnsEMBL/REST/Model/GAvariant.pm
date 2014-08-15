@@ -21,10 +21,13 @@ package EnsEMBL::REST::Model::GAvariant;
 use Moose;
 extends 'Catalyst::Model';
 use Data::Dumper;
+use Data::UUID;
 
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
+
+our $tmp_directory = "/tmp/ensrest/GAFiles";
 
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
@@ -32,47 +35,118 @@ sub build_per_context_instance {
 }
 
 sub fetch_gavariant {
-  my ($self, $data) = @_;
 
-  my $c = $self->context();
-  my $species = 'homo_sapiens'; ## GA4GH only for human, species not specified in request
+  my ($self, $data ) = @_;
 
-  ## is filtering by sample required
+  print  localtime() . " Got request\n"; 
+#  print Dumper $data;
+
+  ## only supporting human at the moment; species not specified in request
+  $data->{species} = 'homo_sapiens';
+
+
+  ## format sample names if filtering by sample required
   if(defined $data->{callSetIds}->[0]){
     my %req_samples;
     foreach my $sample ( @{$data->{callSetIds}} ){
       $req_samples{$sample} = 1; 
     }
     $data->{samples} = \%req_samples;
+  }
+
+  ## get variation data 
+
+  if ( $data->{variantName} ne ""){
+    ## if variant name supplied look up by name   
+    return $self->fetch_by_name($data);      
+  }
+
+  else{
+    ## pull out set by region if variant name not supplied
+    return $self->fetch_by_region($data);
+  }
+
+}
+
+sub fetch_by_region{
+
+  my $self = shift;
+  my $data = shift;
+
+  my $c = $self->context();
+
+  ## if this is a new request look up the ids required & set first token   
+  $data->{pageToken} = $self->get_variantRequestIds($c, $data)  if $data->{pageToken} eq "";
+
+  $c->go('ReturnError', ' no data available') unless exists $data->{pageToken};
+
+
+  ## get the next range of ids for the token
+  my ($ids, $next_token) = get_nextByToken($data->{pageToken}, $data->{maxResults});
+  ## exit if none found
+  $c->go( 'ReturnError', 'custom', [ " No variants are available for this search token: $data->{pageToken}, batch: $data->{maxResults}" ] )  unless exists $ids->[0];
+
+  my $vfa = $c->model('Registry')->get_adaptor($data->{species}, 'Variation', 'VariationFeature');
   
-print Dumper $data;
-
-  }
-  my $sla = $c->model('Registry')->get_adaptor($species, 'Core', 'Slice');
-  my $vfa = $c->model('Registry')->get_adaptor($species, 'Variation', 'VariationFeature');
-
-  my $location = "$data->{referenceName}\:$data->{start}\-$data->{end}";
-  my $slice = $sla->fetch_by_toplevel_location($location);
-  if (!$slice) {
-    $c->go('ReturnError', 'custom', ["sequence $location not found for $species"]);
-  }
-
+  ## get details for variationfeature ids
   my @var_response;
 
-  my $vfs = $vfa->fetch_all_by_Slice($slice);
-
-  foreach my $vf(@{$vfs}){
-
-    ## filter by variant name if required
-    next if defined $data->{variantName} && $vf->{variation_name} ne  $data->{variantName};
-   
+  foreach my $vfid( @{$ids}){
+    my $vf = $vfa->fetch_by_dbID($vfid);
+     
+    $c->go('ReturnError', 'custom', ["No data for next variation in list ($vf)"]) if !$vf;;
+      
     ## extract & format
     my $ga_var = $self->to_hash($vf, $data);
     push @var_response, $ga_var;
   }
 
+  push @var_response, ["nextPageToken" => $next_token];
+  print  localtime() . " responding\n";
   return (\@var_response);
+  
 }
+
+sub fetch_by_name{
+
+  my $self = shift;
+  my $data = shift;
+
+  my $c = $self->context();
+
+  ## look up variant info
+  my $vfa = $c->model('Registry')->get_adaptor($data->{species}, 'Variation', 'VariationFeature');
+  my $va  = $c->model('Registry')->get_adaptor($data->{species}, 'Variation', 'Variation');
+
+
+  my @var_response;
+
+  my $var  =  $va->fetch_by_name( $data->{variantName} );
+  $c->go('ReturnError', 'custom', ["No data for a variation named $data->{variantName}" ]) unless defined $var;
+
+  my $vfs  =  $vfa->fetch_all_by_Variation($var);
+  $c->go('ReturnError', 'custom', ["No location for a variation named $data->{variantName}" ]) unless defined $vfs->[0];
+
+  ## check position
+  my $found_in_region = 0;
+
+  foreach my $vf (@{$vfs}){
+    ##print "Checking vf location: ".  $vf->slice->seq_region_name() .":".$vf->seq_region_start() . "  v $data->{referenceName} : $data->{start}  & $data->{end}\n"; 
+    if( $vf->slice->seq_region_name() eq $data->{referenceName} &&
+         $vf->seq_region_start() >= $data->{start}  &&
+         $vf->seq_region_start() <= $data->{end}){
+
+       ## extract & format
+       my $ga_var = $self->to_hash($vf, $data);
+       push @var_response, $ga_var;
+       $found_in_region = 1 ;
+    }
+  }
+  $c->go('ReturnError', 'custom', ["No data for variation named $data->{variantName} in required region"]) unless $found_in_region == 1 ;
+  print  localtime() . " responding\n"; 
+  return \@var_response;
+}
+
 
 
 sub to_hash {
@@ -170,6 +244,111 @@ sub Consequences{
   return $cons_string;
 
 }
+
+## extract all ids for request and put in temp file to allow paging
+sub get_variantRequestIds{
+
+    my ($self, $c, $data) = @_;
+
+    ## request id/ file name (is md5 on request better?)
+    my $unique_id = get_unique_id();
+ 
+    ## allow filtering by set or return of everything
+    my $constraint = " ";
+    $constraint = " and find_in_set($data->{set}, variation_feature.variation_set_id)>0 "
+	if defined $data->{set} && $data->{set} > 0 ;
+
+    my $dbh = $c->model('Registry')->get_DBAdaptor($data->{species}, 'Variation');
+    my $data_ext_sth = $dbh->prepare(qq[select variation_feature.variation_feature_id 
+                                        from seq_region, variation_feature 
+                                         where variation_feature.seq_region_id = seq_region.seq_region_id 
+                                        and seq_region.name= ?
+                                        and variation_feature.seq_region_start between ? and ?
+                                        $constraint ]);
+
+
+    $data_ext_sth->{'mysql_use_result'} = 1;
+    print  localtime() . " seeking " . $data->{referenceName} .":". $data->{start} ."-". $data->{end} ."\n";
+    $data_ext_sth->execute($data->{referenceName}, $data->{start}, $data->{end} ) ||die;
+
+
+    ## create request specific temp file to handle paging
+    my $filename =  $tmp_directory . "/GA_$unique_id\.bed";
+
+    open my $out, ">$filename" ||die "Failed to open file ($filename) to write : $!\n";
+
+    my $n   = 0;
+
+    while(my $line = $data_ext_sth->fetchrow_arrayref()){	
+	$n++;
+	print $out "1\t$n\t$n\t$line->[0]\n";       ## faked BED
+
+    }
+    close $out || die "Failed to close tmp file : $!\n";
+
+    if ($n ==0){
+	print "No data found for $data->{seq} : $data->{start} - $data->{end}\n";
+	return undef ;
+    }
+    ## format file
+    print  localtime() ." dumped - zipping\n"; 
+    system("bgzip $filename ") == 0      || die "Failed to bgzip $filename: $!";
+    print  localtime() ." zipped - indexing\n";
+    system("tabix -p bed $filename\.gz ") == 0  || die "Failed to tabix $filename: $!";
+    print  localtime() ." indexed\n";
+    
+    ## create first token
+    my $token = "$unique_id\_1";
+
+    return $token;
+
+}
+
+### Database it??
+sub get_nextByToken{
+
+    my $token      = shift;
+    my $batch_size = shift;
+
+    my @return_ids;
+
+    my ($unique_id, $start_pos ) = split/\_/,$token;
+
+    my $filename  = $tmp_directory . "/GA_$unique_id\.bed.gz";
+    die  "$filename not found\n"   unless -e($filename) ;
+
+    my $new_pos = $start_pos + $batch_size;
+
+   
+    my $c = 0;
+    open my $tab, "tabix $filename 1:$start_pos\-$new_pos  |" 
+	||die "Failed to extract vf from index file : $!\n";
+    while(<$tab>){
+	my @a = split;
+	push @return_ids, $a[3];
+	$c++;
+    }
+
+    ## increment to next in file for new token
+    my $new_token;
+    if( $c == $batch_size ){
+	## how to handle end of file - need to not return at token if at the end (this doen't catch the last batch if it is full)
+
+	$new_token = "$unique_id\_$new_pos";
+    }
+    return (\@return_ids, $new_token );
+}
+
+## is this OK - is md5 on request better?
+sub get_unique_id{
+
+    my $ug    = Data::UUID->new;
+    my $uuid = $ug->create_str(); 
+    return $uuid;
+}
+
+
+
 
 with 'EnsEMBL::REST::Role::Content';
 
