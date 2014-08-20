@@ -255,8 +255,10 @@ sub get_variantRequestIds{
  
     ## allow filtering by set or return of everything
     my $constraint = " ";
-    $constraint = " and find_in_set($data->{set}, variation_feature.variation_set_id)>0 "
-	if defined $data->{set} && $data->{set} > 0 ;
+print Dumper $data->{variantSetIds}; 
+    $constraint = " and find_in_set(\'$data->{variantSetIds}->[0]\', variation_feature.variation_set_id)>0 "
+	if defined $data->{variantSetIds}->[0] && $data->{variantSetIds}->[0] > 0 ;
+    print "Constraint is : $constraint\n";
 
     my $dbh = $c->model('Registry')->get_DBAdaptor($data->{species}, 'Variation');
     my $data_ext_sth = $dbh->prepare(qq[select variation_feature.variation_feature_id 
@@ -286,10 +288,8 @@ sub get_variantRequestIds{
     }
     close $out || die "Failed to close tmp file : $!\n";
 
-    if ($n ==0){
-	print "No data found for $data->{seq} : $data->{start} - $data->{end}\n";
-	return undef ;
-    }
+    $c->go('ReturnError', 'custom', ["No data found in the required region"]) if $n ==0;
+    
     ## format file
     print  localtime() ." dumped - zipping\n"; 
     system("bgzip $filename ") == 0      || die "Failed to bgzip $filename: $!";
