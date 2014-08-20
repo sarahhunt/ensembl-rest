@@ -28,7 +28,7 @@ EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 
 =pod
 
-POST requests : /GAvariant/
+POST requests : /variants/
 
 { "variantSetIds": [1],
  "variantName": '' ,
@@ -53,7 +53,7 @@ sub get_request_POST {
 }
 
 
-sub get_request: Chained('/') PathPart('GAvariant') ActionClass('REST')  {
+sub get_request: Chained('/') PathPart('variants') ActionClass('REST')  {
   my ( $self, $c ) = @_;
   my $post_data = $c->req->data;
 
