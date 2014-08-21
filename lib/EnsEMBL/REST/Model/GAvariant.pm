@@ -27,7 +27,7 @@ with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
 
-our $tmp_directory = "/tmp/ensrest/GAFiles";
+
 
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
@@ -76,13 +76,13 @@ sub fetch_by_region{
   my $c = $self->context();
 
   ## if this is a new request look up the ids required & set first token   
-  $data->{pageToken} = $self->get_variantRequestIds($c, $data)  if $data->{pageToken} eq "";
+  $data->{pageToken} = $self->get_first_token($c, $data)  if $data->{pageToken} eq "";
 
   $c->go('ReturnError', ' no data available') unless exists $data->{pageToken};
 
 
   ## get the next range of ids for the token
-  my ($ids, $next_token) = get_nextByToken($data->{pageToken}, $data->{maxResults});
+  my ($ids, $next_token) = $self->get_next_by_token($data);
   ## exit if none found
   $c->go( 'ReturnError', 'custom', [ " No variants are available for this search token: $data->{pageToken}, batch: $data->{maxResults}" ] )  unless exists $ids->[0];
 
@@ -245,106 +245,77 @@ sub Consequences{
 
 }
 
-## extract all ids for request and put in temp file to allow paging
-sub get_variantRequestIds{
+sub get_first_token{
 
-    my ($self, $c, $data) = @_;
+  my ($self, $c, $data) = @_;
 
-    ## request id/ file name (is md5 on request better?)
-    my $unique_id = get_unique_id();
+  my $unique_id = get_unique_id();
+
+  my $token = $unique_id ."_". $data->{start};
+
+  return $token;
+}
+
+
+## extract a batch of ids for request and hold new start pos in token string
+sub get_next_by_token{
+
+  my ($self, $data) = @_;
  
-    ## allow filtering by set or return of everything
-    my $constraint = " ";
-print Dumper $data->{variantSetIds}; 
-    $constraint = " and find_in_set(\'$data->{variantSetIds}->[0]\', variation_feature.variation_set_id)>0 "
-	if defined $data->{variantSetIds}->[0] && $data->{variantSetIds}->[0] > 0 ;
-    print "Constraint is : $constraint\n";
-
-    my $dbh = $c->model('Registry')->get_DBAdaptor($data->{species}, 'Variation');
-    my $data_ext_sth = $dbh->prepare(qq[select variation_feature.variation_feature_id 
-                                        from seq_region, variation_feature 
-                                         where variation_feature.seq_region_id = seq_region.seq_region_id 
-                                        and seq_region.name= ?
-                                        and variation_feature.seq_region_start between ? and ?
-                                        $constraint ]);
+  my ($request_id, $batch_start) = (split/\_/,$data->{pageToken});
 
 
-    $data_ext_sth->{'mysql_use_result'} = 1;
-    print  localtime() . " seeking " . $data->{referenceName} .":". $data->{start} ."-". $data->{end} ."\n";
-    $data_ext_sth->execute($data->{referenceName}, $data->{start}, $data->{end} ) ||die;
+  ## allow filtering by set or return of everything
+  my $constraint = " ";
+  print Dumper $data->{variantSetIds}; 
+  $constraint = " and find_in_set(\'$data->{variantSetIds}->[0]\', vf.variation_set_id)>0 "
+    if defined $data->{variantSetIds}->[0] && $data->{variantSetIds}->[0] > 0 ;
+  print "Constraint is : $constraint\n";
+
+  my $limit = $data->{maxResults} + 1; ## is there anything to come back for in another batch
+
+  my $dbh = $self->context()->model('Registry')->get_DBAdaptor($data->{species}, 'Variation');
+  my $data_ext_sth = $dbh->prepare(qq[  select vf.variation_feature_id, vf.seq_region_start  
+                                        from seq_region sr, variation_feature vf
+                                        where vf.seq_region_id = sr.seq_region_id 
+                                        and sr.name= ?
+                                        and vf.seq_region_start between ? and ?
+                                        $constraint
+                                        limit $limit ]);
 
 
-    ## create request specific temp file to handle paging
-    my $filename =  $tmp_directory . "/GA_$unique_id\.bed";
+  $data_ext_sth->{'mysql_use_result'} = 1;
+  print  localtime() . " seeking " . $data->{referenceName} .":". $batch_start ."-". $data->{end} ."\n";
+  $data_ext_sth->execute($data->{referenceName}, $batch_start, $data->{end} ) ||die;
 
-    open my $out, ">$filename" ||die "Failed to open file ($filename) to write : $!\n";
+  my $n  = 0;
+  my @object_ids;
+  my $last_pos;   ## next batch start
 
-    my $n   = 0;
-
-    while(my $line = $data_ext_sth->fetchrow_arrayref()){	
-	$n++;
-	print $out "1\t$n\t$n\t$line->[0]\n";       ## faked BED
-
-    }
-    close $out || die "Failed to close tmp file : $!\n";
-
-    $c->go('ReturnError', 'custom', ["No data found in the required region"]) if $n ==0;
+  while(my $line = $data_ext_sth->fetchrow_arrayref()){	
+    $n++;
+    push @object_ids, $line->[0] if $n <= $data->{maxResults} ;
+    $last_pos = $line->[1];
+  }
+  ## this should not happen
+  $self->context()->go('ReturnError', 'custom', ["No data found in the required region"]) if $n ==0;
     
-    ## format file
-    print  localtime() ." dumped - zipping\n"; 
-    system("bgzip $filename ") == 0      || die "Failed to bgzip $filename: $!";
-    print  localtime() ." zipped - indexing\n";
-    system("tabix -p bed $filename\.gz ") == 0  || die "Failed to tabix $filename: $!";
-    print  localtime() ." indexed\n";
-    
-    ## create first token
-    my $token = "$unique_id\_1";
 
-    return $token;
+  ## create next token to include the position of next the variant if an extra one is available
+  my $token = $request_id ."_" . $last_pos  if $n>$data->{maxResults} ;
+
+
+  return (\@object_ids, $token);
 
 }
 
-### Database it??
-sub get_nextByToken{
-
-    my $token      = shift;
-    my $batch_size = shift;
-
-    my @return_ids;
-
-    my ($unique_id, $start_pos ) = split/\_/,$token;
-
-    my $filename  = $tmp_directory . "/GA_$unique_id\.bed.gz";
-    die  "$filename not found\n"   unless -e($filename) ;
-
-    my $new_pos = $start_pos + $batch_size;
-
-   
-    my $c = 0;
-    open my $tab, "tabix $filename 1:$start_pos\-$new_pos  |" 
-	||die "Failed to extract vf from index file : $!\n";
-    while(<$tab>){
-	my @a = split;
-	push @return_ids, $a[3];
-	$c++;
-    }
-
-    ## increment to next in file for new token
-    my $new_token;
-    if( $c == $batch_size ){
-	## how to handle end of file - need to not return at token if at the end (this doen't catch the last batch if it is full)
-
-	$new_token = "$unique_id\_$new_pos";
-    }
-    return (\@return_ids, $new_token );
-}
 
 ## is this OK - is md5 on request better?
 sub get_unique_id{
 
-    my $ug    = Data::UUID->new;
-    my $uuid = $ug->create_str(); 
-    return $uuid;
+  my $ug   = Data::UUID->new;
+  my $uuid = $ug->create_str(); 
+  return $uuid;
 }
 
 
