@@ -59,10 +59,22 @@ sub get_request: Chained('/') PathPart('variants') ActionClass('REST')  {
 
   $c->log->debug(Dumper $post_data);
 
-  ## not using these if token is supplied but required by spec, so check early
-  unless (exists $post_data->{referenceName}){ $c->go( 'ReturnError', 'custom', [ ' Cannot find "referenceName" key in your request' ] ) };
-  unless (exists $post_data->{start}){         $c->go( 'ReturnError', 'custom', [ ' Cannot find "start" key in your request' ] ) };
-  unless (exists $post_data->{end}){           $c->go( 'ReturnError', 'custom', [ ' Cannot find "end" key in your request' ] ) };
+  ## required by spec, so check early
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "referenceName" key in your request' ] ) 
+    unless exists $post_data->{referenceName} ;
+
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "start" key in your request'])         
+    unless exists $post_data->{start};
+
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "end" key in your request'])   
+    unless exists $post_data->{end};
+
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "variantSetIds" key in your request'])
+    unless exists $post_data->{variantSetIds}->[0];
+
+
+  $c->go( 'ReturnError', 'custom', [ ' key "maxResults" must be a positive number'])
+    if exists $post_data->{maxResults} && $post_data->{maxResults} <1;
 
 
   my $gavariant;
