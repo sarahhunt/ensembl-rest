@@ -26,7 +26,7 @@ use Data::Dumper;
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
-
+our $config_file = "/home/vagrant/src/ensembl-rest/ga_vcf_config.json"; 
 
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
@@ -37,11 +37,7 @@ sub fetch_ga_callSet {
 
   my ($self, $data ) = @_;
 
-  print  localtime() . " Got request\n"; 
-  print Dumper $data;
-
-  ## only supporting human at the moment; species not specified in request
-  $data->{species} = 'homo_sapiens';
+#  print Dumper $data;
 
   ## format set ids if filtering by set required
   if(defined $data->{variantSetIds}->[0]){
@@ -54,12 +50,9 @@ sub fetch_ga_callSet {
   } 
 
   ## extract required sets
-  my $callsets = $self->fetch_callSets($data);
+  return $self->fetch_callSets($data);
 
-  return  $callsets;
 }
-
-
 
 
 sub fetch_callSets{
@@ -67,53 +60,64 @@ sub fetch_callSets{
   my $self = shift;
   my $data = shift;
 
-  my $c = $self->context();
-  
-  my $dbh = $c->model('Registry')->get_DBAdaptor($data->{species}, 'Variation');
-
-=head
-  ## limit by sample name if required
-  my $constraint = " ";
-  $constraint = " and ind.name like \'%$data->{name}%\'  " if defined $data->{name} && $data->{name} =~/\w+/;
-
-  my $indset_ext_stmt  = (qq[ select ind.individual_id, ind.name, ind.variation_set_id from individual ind 
-                             where ind.variation_set_id is not null $constraint ]);
-  warn "preping $indset_ext_stmt \n";
-  my $indset_ext_sth  = $dbh->prepare($indset_ext_stmt);
-
-  $indset_ext_sth->execute()||die;
-  my $set_data = $indset_ext_sth->fetchall_arrayref();
-=cut
-
-  ## hack pending db update
-  my $set_data;
-  open my $ind_dump, "/tmp/ensrest/GAFiles/individual.dat" || die "failed to open individual - set file\n";
-  while(<$ind_dump>){
-    chomp;
-    my @a = split/\t/;
-    next if defined $data->{name} && $a[1] !~ /$data->{name}/i ;
-    push @{$set_data}, \@a;
- }
- ## 
+  ## ind_id to start taken from page token - start from 0 if none supplied [!!put ids back]
+  $data->{pageToken} = 0  if $data->{pageToken} eq "";
+  my $next_ind_id   =  $data->{pageToken} ;
 
   my @callsets;
-  foreach my $l(@{$set_data}){
-    my @sets = split/\,/,$l->[2];
-    foreach my $set (@sets){
+  my $n = 0;
+  my $newPageToken; ## save id of next individual to start with
+
+
+   ## read config
+  open my $cf, $config_file ||
+    $self->context()->go( 'ReturnError', 'custom', [ " Failed to find config to extract set ids variantSets"]);
+
+  local $/ = undef;
+  my $json_string = <$cf>;
+  close $cf;
+
+  my $config = JSON->new->decode($json_string) ||  
+    $self->context()->go( 'ReturnError', 'custom', [ " Failed to parse config for variantSets"]); 
+
+  my $count_ind = 1;## for paging [!!put ids back]
+  foreach my $hash(@{$config->{collections}}) {
+
+    ## loop over variantSets
+    foreach my $varSetId(keys %{$hash->{sets}}){
+      ## limit by data set if required
+      next if defined  $data->{req_variantsets} &&  ! defined $data->{req_variantsets}->{ $hash->{varSetId} }; 
+    }
+
+    ## loop over callSets
+    foreach my $callset_id( sort( keys %{$hash->{individual_populations}} ) ){
       
       ## limit by variant set if required
-      next if defined $data->{req_variantsets} && ! defined $data->{req_variantsets}->{$set} ;
+      next if defined $data->{req_variantsets} && ! defined $data->{req_variantsets}->{ $hash->{individual_populations}->{$callset_id}->[0] } ;
+
+      ## paging
+      next if $count_ind <$next_ind_id;
+      $count_ind++;
+      if (defined $data->{pageSize} && $n == $data->{pageSize}){
+        $newPageToken = $callset_id;
+        last;
+      }
+      
       my $callset;
-      $callset->{sampleId} = $l->[1];
-      $callset->{id}       = $l->[1]; ##$set . "_" . $l->[0];        ##concaternation of set id & sample id
-      $callset->{name}     = $l->[1]; ##$name{$set} . "_". $l->[1];  ##concaternation of set name & sample name
+      $callset->{sampleId} = $callset_id;
+      $callset->{id}       = $callset_id;
+      $callset->{name}     = $callset_id;
       push @callsets, $callset;
+      $n++;
     }
   }
-  print  localtime() . " responding\n";
+ 
+  push @callsets, {"pageToken" => $newPageToken } if defined $newPageToken ;
+
   return (\@callsets);
   
 }
+
 
 
 1;

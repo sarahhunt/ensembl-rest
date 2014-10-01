@@ -69,6 +69,10 @@ sub get_request: Chained('/') PathPart('variants') ActionClass('REST')  {
   $c->go( 'ReturnError', 'custom', [ ' Cannot find "end" key in your request'])   
     unless exists $post_data->{end};
 
+  $c->go( 'ReturnError', 'custom', [ '  End of interval cannot be greater than start of interval'])
+    unless $post_data->{end} >= $post_data->{start};
+
+
   $c->go( 'ReturnError', 'custom', [ ' Cannot find "variantSetIds" key in your request'])
     unless exists $post_data->{variantSetIds}->[0];
 

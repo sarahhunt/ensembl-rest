@@ -17,16 +17,17 @@ limitations under the License.
 =cut
 
 package EnsEMBL::REST::Model::GAvariant;
-
+## version using raw IO mods
 use Moose;
 extends 'Catalyst::Model';
 use Data::Dumper;
+use Bio::EnsEMBL::IO::Parser::VCF4Tabix;
 
 
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
-
+our $config_file = "/home/vagrant/src/ensembl-rest/ga_vcf_config.json"; 
 
 
 sub build_per_context_instance {
@@ -38,10 +39,6 @@ sub fetch_gavariant {
 
   my ($self, $data ) = @_;
 
-  print  localtime() . " Got request\n"; 
-
-  ## only supporting human at the moment; species not specified in request
-  $data->{species} = 'homo_sapiens';
 
   ## need these ordered for paging
   @{$data->{variantSetIds}} = sort @{$data->{variantSetIds}};
@@ -52,46 +49,58 @@ sub fetch_gavariant {
   ## exclude samples outside specified variantSet and variantSet with no required samples
   $data = $self->check_sample_info($data) if defined $data->{callSetIds}->[0] ;
 
+  ## set up files required
+  $data->{files} = $self->get_req_file($data);
 
-  ## get variation data 
-  if ( $data->{variantName} ne ""){
-    ## if variant name supplied look up by name   
-    return $self->fetch_by_name($data);      
-  }
-
-  else{
-    ## pull out set by region if variant name not supplied
-    return $self->fetch_by_region($data);
-  }
+  ## get variation data - pull out set by region & filter on variant name if supplied
+  return $self->fetch_by_region($data);
 
 }
 
-
+## link sample names to variantSet for later filtering
 sub get_set_info{
 
   my ($self, $data ) = @_;
 
-  ## link sample names to variantSet for later filtering
-  if(defined $data->{variantSetIds}->[0] && $data->{variantSetIds}->[0] >0){ ##use 0 for everything?
-
+  ## extract required variantSets if supplied
+  if(defined $data->{variantSetIds}->[0] && $data->{variantSetIds}->[0] >0){ 
     foreach my $set (@{$data->{variantSetIds}}){
       $data->{required_set}->{$set} = 1;
     }
+  }
 
-    ## hack pending db update
-    open my $ind_dump, "/tmp/ensrest/GAFiles/individual.dat" || die "failed to open individual - set file\n";
-    while(<$ind_dump>){
-      chomp;
-      my @a = split;
-      $data->{sample2set}->{$a[1]} = $a[2] if  defined $data->{required_set}->{$a[2]};
+  ## read config to get call set to variant set link
+  open my $cf, $config_file ||
+    $self->context()->go( 'ReturnError', 'custom', [ " Failed to find config to extract set ids variantSets"]);
+
+  local $/ = undef;
+  my $json_string = <$cf>;
+  close $cf;
+
+  my $config = JSON->new->decode($json_string) ||  
+    $self->context()->go( 'ReturnError', 'custom', [ " Failed to parse config for variantSets"]); 
+
+  foreach my $dataSet( @{$config->{collections}} ) {
+
+    ## loop over callSets
+    foreach my $callset_id(keys %{$dataSet->{individual_populations}} ){
+ 
+     my $variantSet_id = $dataSet->{individual_populations}->{$callset_id}->[0];
+
+      ## limit by variant set if required
+      next if defined $data->{variantSetIds}->[0] && ! defined $data->{required_set}->{$variantSet_id} ;
+
+      ## save sample to variantSet link
+      $data->{sample2set}->{$callset_id} = $dataSet->{individual_populations}->{$callset_id}->[0];
     }
   }
- return $data;
+  return $data;
 }
+  
 
 
 ## format sample names if filtering by sample required
-## variantSet limitation takes presidence
+## variantSet limitation takes presidence 
 sub check_sample_info{
 
   my ($self, $data ) = @_;
@@ -99,8 +108,8 @@ sub check_sample_info{
   my %req_samples; ## store sample <-> variantSet link
   my %req_sets;    ## if samples are specified, don't look in sets not containing them
 
-  foreach my $sample ( @{$data->{callSetIds}} ){
-    if (defined  $data->{sample2set}->{$sample}){
+  foreach my $sample ( @{ $data->{callSetIds} } ){
+    if (defined  $data->{sample2set}->{$sample}){ ## only set if set required or no set limit 
       $req_samples{$sample} = 1;
       $req_sets{ $data->{sample2set}->{$sample} } = 1;
     }
@@ -118,6 +127,20 @@ sub check_sample_info{
   return $data;
 }
 
+## place holder
+sub get_req_file{
+
+  my $self = shift;
+  my $data = shift;
+
+  my @files;
+
+  my $file = "/home/vagrant/1KG_data/ALL.chr" . $data->{referenceName} . ".phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz";
+  push @files, $file;
+
+  return \@files;
+
+}
 
 sub fetch_by_region{
 
@@ -129,188 +152,77 @@ sub fetch_by_region{
   ## if this is a new request set first token to start of region and set 0  
   $data->{pageToken} = $data->{start} . "_0" if $data->{pageToken} eq "";
 
-  ## get the next range of ids for the token
-  my $ids = $self->get_next_by_token($data);
-  ## exit if none found
-  $c->go( 'ReturnError', 'custom', [ " No variants are available for this search token: $data->{pageToken}, batch: $data->{maxResults}" ] )  
-     unless scalar(@{$ids}) >0;
+  ## get the next range of variation data for the token - should return slightly more than required
+  my $var_info = $self->get_next_by_token($data);
 
-  my $vfa = $c->model('Registry')->get_adaptor($data->{species}, 'Variation', 'VariationFeature');
+  ## exit if none found
+  $c->go( 'ReturnError', 'custom', [ " No variants are available for this search token: $data->{pageToken}, batch: $data->{pageSize}" ] )  
+     unless scalar(@{$var_info}) >0;
   
-  ## get details for variationfeature ids
+  ## get the correct number of GAvariants - returning by variantSet means 1var => many GAvar
   my @var_response;
   my $gavariant_count = 0;
+
   my $next_token;
+  ## last reported position & setid
   my ($last_pos, $last_set ) = split/\_/,  $data->{pageToken} ;
 
-  foreach my $vfid( @{$ids}){
-
-    last if $gavariant_count == $data->{maxResults};
-
-    my $vf = $vfa->fetch_by_dbID($vfid);
+  foreach my $ga_var( @{$var_info}){
+   
+    last if $gavariant_count == $data->{pageSize};
      
-    $c->go('ReturnError', 'custom', ["No data for next variation in list ($vf)"]) if !$vf;;
-      
-    ## extract & format - may return many GAvariants from different variantsets for a variant
-    my $ga_vars = $self->to_hash($vf, $data );
+    ## last batch may have ended mid-variant - skip any which have been returned
+    next if $ga_var->{start} == $last_pos &&  $ga_var->{variantSetId} <= $last_set;
 
-
-    foreach my $ga_var (@{$ga_vars}){ 
+    ## save var and count total
+    $gavariant_count++;
+    push @var_response, $ga_var;
       
-      ## last batch may have ended mid-variant - skip any which have been returned
-      next if $ga_var->{start} == $last_pos &&  $ga_var->{variantSetId} <= $last_set;
-
-      $gavariant_count++;
-      push @var_response, $ga_var;
-      
-      if($gavariant_count == $data->{maxResults}){
-        ## set next token to position and set of last reported result  
-        $next_token =  $ga_var->{start} ."_". $ga_var->{variantSetId} ;
-        last;
-      }
+    if($gavariant_count == $data->{pageSize}){
+      ## set next token to position and set of last reported result  
+      $next_token =  $ga_var->{start} ."_". $ga_var->{variantSetId} ;
+      last;
     }
   }
   push @var_response, ["nextPageToken" => $next_token];
   print  localtime() . " responding\n";
+
   return (\@var_response);
   
 }
 
-sub fetch_by_name{
-
-  my $self = shift;
-  my $data = shift;
-
-  my $c = $self->context();
-
-  ## look up variant info
-  my $vfa = $c->model('Registry')->get_adaptor($data->{species}, 'Variation', 'VariationFeature');
-  my $va  = $c->model('Registry')->get_adaptor($data->{species}, 'Variation', 'Variation');
-
-
-  my @var_response;
-
-  my $var  =  $va->fetch_by_name( $data->{variantName} );
-  $c->go('ReturnError', 'custom', ["No data for a variation named $data->{variantName}" ]) unless defined $var;
-
-  my $vfs  =  $vfa->fetch_all_by_Variation($var);
-  $c->go('ReturnError', 'custom', ["No location for a variation named $data->{variantName}" ]) unless defined $vfs->[0];
-
-  ## check position
-  my $found_in_region = 0;
-
-  foreach my $vf (@{$vfs}){
-    ##print "Checking vf location: ".  $vf->slice->seq_region_name() .":".$vf->seq_region_start() . "  v $data->{referenceName} : $data->{start}  & $data->{end}\n"; 
-    if( $vf->slice->seq_region_name() eq $data->{referenceName} &&
-         $vf->seq_region_start() >= $data->{start}  &&
-         $vf->seq_region_start() <= $data->{end}){
-
-       ## extract & format
-       my $ga_var = $self->to_hash($vf, $data);
-       push @var_response, $ga_var;
-       $found_in_region = 1 ;
-    }
-  }
-  $c->go('ReturnError', 'custom', ["No data for variation named $data->{variantName} in required region"]) unless $found_in_region == 1 ;
-  print  localtime() . " responding\n"; 
-  return \@var_response;
-}
-
-
-
-sub to_hash {
-
-  my ($self, $vf, $data) = @_;
-
-  my @variants;
-
-  ## get non-set specific data to share between GA variants
-
-  my @alleles = (split/\//, $vf->allele_string); 
-
-  my $genotype_calls = $self->Genotypes($vf, \@alleles, $data);
-
-  ## ?? Exclude multi-mapping, non-sorted var [calc set specific here?] 
-  my $referenceBases = shift @alleles;
-  my $alternateBases = \@alleles;
-
-  ## extract consequence SO terms
-  my $consequences   = $self->Consequences($vf);
-
-  ## loop over sets to divide up genotypes
-  foreach my $set_required (@{$data->{variantSetIds}}){
-
-    ## check there are genotypes to return
-    next unless exists $genotype_calls->{$set_required}->[0];
-
-    my $variation_hash;
-
-    $variation_hash->{variantSetId}   = $set_required ;
-    $variation_hash->{id}             = $vf->name();
-    $variation_hash->{name}           = $vf->name();
-  
-    $variation_hash->{calls}          = $genotype_calls->{$set_required};
- 
-    $variation_hash->{referenceBases} = $referenceBases;
-    $variation_hash->{alternateBases} = $alternateBases;
-    $variation_hash->{consequences}   = $consequences;
-
-    $variation_hash->{referenceName}  = $vf->seq_region_name();
-
-    ## position is zero-based
-    ## closed start of interval 
-    $variation_hash->{start}          = $vf->seq_region_start() -1;                                           
-    ## open end of interval 
-    $variation_hash->{end}            = $vf->seq_region_end() ;
-
-    push @variants, $variation_hash;
-  }
-  return \@variants;
-}
-
-
 
 ## extract genotypes & apply filtering
-sub Genotypes {
-  my ($self, $vf, $alleles, $data) = @_;
-
-  my %id;
-  for (my $n=0; $n < scalar(@{$alleles}); $n++){
-       $id{$alleles->[$n]} = $n;
-  }  
-
+## input: array of strings - format : 'NA10000:0|1:44:23'
+## output: hash with key: variantSetID and value: array of individual genotype hashes
+sub sort_genotypes {
+  my ($self, $geno_strings, $data) = @_;
 
   my %genotypes;
-  my $genotypes = $vf->variation->get_all_IndividualGenotypes();
-  foreach my $gen (@$genotypes) {
+
+  foreach my $geno_string(@{$geno_strings}){
+
+    my ($sample, $call, $qual) = split(/\:/,$geno_string,3);
 
     ## filter by individual if required
     next if defined $data->{callSetIds}->[0] && 
-      !defined $data->{samples}->{$gen->individual()->name()};
+      !defined $data->{samples}->{$sample};
+
+    my $gen_hash;
+    $gen_hash->{callSetId}    = $sample;
+    $gen_hash->{callSetName}  = $sample;
+    @{$gen_hash->{genotype}}  = split/\|/, $call;
+   # @{$gen_hash->{genotypeLikelihood}}  = split/\|/, $qual if defined $qual;
 
     ## store genotypes by variationSetId
-    push @{$genotypes{ $data->{sample2set}->{ $gen->individual()->name() }} }, $self->gen_as_hash($gen, \%id)
-      if defined $data->{sample2set}->{ $gen->individual()->name() };
+    push @{$genotypes{ $data->{sample2set}->{$sample}}}, $gen_hash
+      if defined $data->{sample2set}->{$sample};
   }
   return \%genotypes;
 }
 
-## format and code genotypes
-sub gen_as_hash {
-  my ($self, $gen, $id) = @_;
 
-  my $gen_hash;
-  $gen_hash->{callSetId}    = $gen->individual->name();
-  $gen_hash->{callSetName}  = $gen->individual->name();
-
-  my $genos =  $gen->genotype();
-  foreach my $g( @{$genos}){
-    push @{$gen_hash->{genotype}}, $id->{$g};
-  }
-
-  return $gen_hash;
-}
-
+=head
 
 ## extract all SO terms for the variants consequences & return string
 sub Consequences{ 
@@ -333,8 +245,9 @@ sub Consequences{
 
 }
 
+=cut
 
-## extract a batch of ids for request and hold new start pos in token string
+## extract a batch of results for request and hold new start pos in token string
 sub get_next_by_token{
 
   my ($self, $data) = @_;
@@ -342,47 +255,67 @@ sub get_next_by_token{
   ## These are the last seq start and set reported
   my ($batch_start, $set_start) = (split/\_/,$data->{pageToken});
 
-  ## filter by set (or return of everything?) 
-  my $constraint = " and (find_in_set(\'$data->{variantSetIds}->[0]\', vf.variation_set_id)>0 ";
-  foreach my $n (1 .. scalar(@{$data->{variantSetIds}})-1 ){
-     $constraint .= " or find_in_set(\'$data->{variantSetIds}->[$n]\', vf.variation_set_id)>0 "
-  }
-  $constraint .= ") ";
-  
+  ## get one extra to see if it is worth sending new page token (only one set may be requested)
+  my $limit = $data->{pageSize} + 1;
 
-  my $limit = $data->{maxResults} + 50; ## is there anything to come back for in another batch
-  ## allowing extra here as variant in set may have no data for a chosen individual
+  ## reduce look up region to a size large enough to hold the requested number of variants??
+  my $batch_end =  $data->{end};
 
-  my $dbh = $self->context()->model('Registry')->get_DBAdaptor($data->{species}, 'Variation');
+  my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open($data->{files}->[0]) || die "Failed to get parser : $!\n";
+  $parser->seek($data->{referenceName},$batch_start,$batch_end);
 
-  $self->context()->go('ReturnError', 'custom', ["Failed to connect to database"]) unless defined $dbh;
+  ## return these ordered by position & set id to allow pagination
+  my @var;
 
-  my $data_ext_sth = $dbh->prepare(qq[  select vf.variation_feature_id, vf.seq_region_start  
-                                        from seq_region sr, variation_feature vf
-                                        where vf.seq_region_id = sr.seq_region_id 
-                                        and sr.name= ?
-                                        and vf.seq_region_start between ? and ?
-                                        $constraint
-                                        limit $limit ]);
+  my $n = 0;
 
 
-  $data_ext_sth->{'mysql_use_result'} = 1;
-  print  localtime() . " seeking ids:" . $data->{referenceName} .":". $batch_start ."-". $data->{end} . " limit $limit\n";
-  $data_ext_sth->execute($data->{referenceName}, $batch_start, $data->{end} ) ||die;
+  while($n < $limit){
+    
+    $parser->next();
+    my $name = $parser->get_IDs->[0];
 
-  my $n  = 0;
-  my @object_ids;
+    ## add filter for variant name if require
+    next if $data->{variantName} =~/\w+/ &&  $data->{variantName} ne $name;
 
-  while(my $line = $data_ext_sth->fetchrow_arrayref()){	
-    $n++;
-    push @object_ids, $line->[0] ;
+    my $raw_genotypes  = $parser->get_raw_individuals_info();
+    ## extract arrays of genotypes by variantSet
+    my $genotype_calls = $self->sort_genotypes($raw_genotypes, $data);
+
+    ## loop over sets to divide up genotypes
+    foreach my $set_required (@{$data->{variantSetIds}}){
+
+      ## check there are genotypes to return
+      next unless exists $genotype_calls->{$set_required}->[0];
+
+      $n++;
+      my $variation_hash;
+
+      $variation_hash->{variantSetId}    = $set_required;
+      $variation_hash->{calls}           = $genotype_calls->{$set_required};
+
+      $variation_hash->{name}            = $name;
+      $variation_hash->{id}              = $name;
+      $variation_hash->{referenceBases}  = $parser->get_reference;
+      $variation_hash->{alternateBases}  = \@{$parser->get_alternatives};
+      $variation_hash->{referenceName}   = $parser->get_seqname ;
+
+      ## position is zero-based + closed start of interval 
+      $variation_hash->{start}           = $parser->get_raw_start -1;
+      ## open end of interval 
+      $variation_hash->{end}             = $parser->get_raw_end;
+
+      push @var, $variation_hash;
+    }
+   
+    ## exit if single required variant already found
+    last if $data->{variantName} =~/\w+/;
   }
 
   ## this should not happen
   $self->context()->go('ReturnError', 'custom', ["No data found in the required region"]) if $n ==0;
   
-
-  return \@object_ids;
+  return \@var;
 
 }
 
