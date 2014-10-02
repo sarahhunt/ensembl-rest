@@ -61,7 +61,7 @@ sub fetch_callSets{
   my $data = shift;
 
   ## ind_id to start taken from page token - start from 0 if none supplied [!!put ids back]
-  $data->{pageToken} = 0  if $data->{pageToken} eq "";
+  $data->{pageToken} = 0  if (! defined $data->{pageToken} || $data->{pageToken} eq "");
   my $next_ind_id   =  $data->{pageToken} ;
 
   my @callsets;
@@ -98,7 +98,7 @@ sub fetch_callSets{
       ## paging
       next if $count_ind <$next_ind_id;
       $count_ind++;
-      if (defined $data->{pageSize} && $n == $data->{pageSize}){
+      if (defined  $data->{pageSize}  &&  $data->{pageSize} =~/\w+/ && $n == $data->{pageSize}){
         $newPageToken = $callset_id;
         last;
       }

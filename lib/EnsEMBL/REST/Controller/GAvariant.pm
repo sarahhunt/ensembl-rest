@@ -37,7 +37,7 @@ POST requests : /variants/
  "start":  140419275,
  "end": 140429275,
  "pageToken":  null,
- "maxResults": 10
+ "pageSize": 10
 }
 
 application/json
@@ -77,8 +77,15 @@ sub get_request: Chained('/') PathPart('variants') ActionClass('REST')  {
     unless exists $post_data->{variantSetIds}->[0];
 
 
-  $c->go( 'ReturnError', 'custom', [ ' key "maxResults" must be a positive number'])
-    if exists $post_data->{maxResults} && $post_data->{maxResults} <1;
+  $c->go( 'ReturnError', 'custom', [ ' key "pageSize" must be a positive number'])
+    if exists $post_data->{pageSize} && $post_data->{pageSize} <1;
+
+  ## for compliance suite
+  $post_data->{pageSize} =  $post_data->{maxResults}  if exists $post_data->{maxResults}; 
+  $post_data->{pageSize} = 10  unless exists $post_data->{pageSize};
+
+  ## DECIDE SENSIBLE LIMIT
+  $post_data->{maxResults} = 10  unless exists $post_data->{maxResults};
 
 
   my $gavariant;

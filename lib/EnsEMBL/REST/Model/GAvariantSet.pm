@@ -65,7 +65,7 @@ sub fetch_sets{
   my $data = shift;
 
   ## ind_id to start from is appended to page token - start from 0 if none supplied
-  $data->{pageToken} = 0  if $data->{pageToken} eq "";
+  $data->{pageToken} = 0  unless ( defined $data->{pageToken} && $data->{pageToken} ne "");
   my $next_set_id    = $data->{pageToken} ;
 
 

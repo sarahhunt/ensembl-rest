@@ -37,11 +37,7 @@ sub build_per_context_instance {
 
 sub fetch_gavariant {
 
-  my ($self, $data ) = @_;
-
-
-  ## need these ordered for paging
-  @{$data->{variantSetIds}} = sort @{$data->{variantSetIds}};
+  my ($self, $data ) = @_; 
 
   ## load callSet to variantSet link 
   $data = $self->get_set_info($data);
@@ -63,7 +59,7 @@ sub get_set_info{
   my ($self, $data ) = @_;
 
   ## extract required variantSets if supplied
-  if(defined $data->{variantSetIds}->[0] && $data->{variantSetIds}->[0] >0){ 
+  if(defined $data->{variantSetIds}->[0] && $data->{variantSetIds}->[0] >0){  
     foreach my $set (@{$data->{variantSetIds}}){
       $data->{required_set}->{$set} = 1;
     }
@@ -89,7 +85,7 @@ sub get_set_info{
 
       ## limit by variant set if required
       next if defined $data->{variantSetIds}->[0] && ! defined $data->{required_set}->{$variantSet_id} ;
-
+ 
       ## save sample to variantSet link
       $data->{sample2set}->{$callset_id} = $dataSet->{individual_populations}->{$callset_id}->[0];
     }
@@ -150,7 +146,7 @@ sub fetch_by_region{
   my $c = $self->context();
 
   ## if this is a new request set first token to start of region and set 0  
-  $data->{pageToken} = $data->{start} . "_0" if $data->{pageToken} eq "";
+  $data->{pageToken} = $data->{start} . "_0" unless exists  $data->{pageToken} && $data->{pageToken} =~/\d+/;
 
   ## get the next range of variation data for the token - should return slightly more than required
   my $var_info = $self->get_next_by_token($data);
@@ -276,14 +272,21 @@ sub get_next_by_token{
     my $name = $parser->get_IDs->[0];
 
     ## add filter for variant name if require
-    next if $data->{variantName} =~/\w+/ &&  $data->{variantName} ne $name;
+    next if defined $data->{variantName} && $data->{variantName} =~/\w+/ &&  $data->{variantName} ne $name;
 
     my $raw_genotypes  = $parser->get_raw_individuals_info();
     ## extract arrays of genotypes by variantSet
     my $genotype_calls = $self->sort_genotypes($raw_genotypes, $data);
 
+    my @sets_to_return; ## sort here for paging
+    if(defined $data->{variantSetIds}->[0]){
+      @sets_to_return = sort @{$data->{variantSetIds}};
+    }
+    else{
+      @sets_to_return = sort (keys %{$genotype_calls});
+    }
     ## loop over sets to divide up genotypes
-    foreach my $set_required (@{$data->{variantSetIds}}){
+    foreach my $set_required (@sets_to_return){
 
       ## check there are genotypes to return
       next unless exists $genotype_calls->{$set_required}->[0];
@@ -309,7 +312,7 @@ sub get_next_by_token{
     }
    
     ## exit if single required variant already found
-    last if $data->{variantName} =~/\w+/;
+    last if defined $data->{variantName} && $data->{variantName} =~/\w+/;
   }
 
   ## this should not happen
