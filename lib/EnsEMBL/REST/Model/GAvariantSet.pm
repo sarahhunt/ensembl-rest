@@ -38,10 +38,10 @@ sub fetch_ga_variantSet {
   my ($self, $data ) = @_;
 
   ## format set ids if filtering by set required
-  if(defined $data->{dataSetIds}->[0]){
+  if(defined $data->{datasetIds}->[0]){
 
     my %req_dataset;
-    foreach my $set ( @{$data->{dataSetIds}} ){
+    foreach my $set ( @{$data->{datasetIds}} ){
       $req_dataset{$set} = 1; 
     }
     $data->{req_datasets} = \%req_dataset;
@@ -51,7 +51,7 @@ sub fetch_ga_variantSet {
   ## extract required variant sets
   my $varsets = $self->fetch_sets($data);
 
-  return ($varsets);
+  return ({"variantSets" => $varsets});
 
 
 }
@@ -86,12 +86,12 @@ sub fetch_sets{
   foreach my $hash(@{$config->{collections}}) {
 
     ## limit by data set if required
-    next if defined  $data->{req_datasets} &&  ! defined $data->{req_datasets}->{ $hash->{dataSetId} }; 
-    
-    ## save variantSets by dataSet 
+    next if defined  $data->{req_datasets} &&  ! defined $data->{req_datasets}->{ $hash->{datasetId} }; 
+
+    ## save variantSets by dataset 
     foreach my $varset(keys %{$hash->{sets}}){
 
-      $variantSets{$varset}{dataSetId}  = $hash->{dataSetId};
+      $variantSets{$varset}{datasetId}  = $hash->{datasetId};
       $variantSets{$varset}{varsetdesc} = $hash->{sets}->{$varset};
     }
   }
@@ -113,7 +113,7 @@ sub fetch_sets{
       
     my $varset;
     $varset->{id}          = $varset_id;
-    $varset->{dataSetId}   = $variantSets{$varset_id}->{dataSetId};
+    $varset->{datasetId}   = $variantSets{$varset_id}->{datasetId};
     ## add meta
     push @varsets, $varset;
     $n++;

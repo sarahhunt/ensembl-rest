@@ -129,10 +129,24 @@ sub get_req_file{
   my $self = shift;
   my $data = shift;
 
-  my @files;
+  my @files; 
 
-  my $file = "/home/vagrant/1KG_data/ALL.chr" . $data->{referenceName} . ".phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz";
-  push @files, $file;
+  if(defined $data->{variantSetIds}->[0]){
+    if($data->{variantSetIds}->[0] == 65){
+      my $file =  "/home/vagrant/Genotypes/Illumina_platinum/NA12878_S1r.chr" . $data->{referenceName} . ".vcf.gz";
+      push @files, $file;
+    }
+    else{
+      my $file = "/home/vagrant/Genotypes/1KG_data/ALL.chr" . $data->{referenceName} . ".phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz";
+      push @files, $file;
+    }
+  }
+  else{
+    my $file1 =  "/home/vagrant/Genotypes/Illumina_platinum/NA12878_S1r.chr" . $data->{referenceName} . ".vcf.gz";
+    push @files, $file1;
+    my $file2 = "/home/vagrant/Genotypes/1KG_data/ALL.chr" . $data->{referenceName} . ".phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz";
+    push @files, $file2;
+  } 
 
   return \@files;
 
@@ -180,10 +194,12 @@ sub fetch_by_region{
       last;
     }
   }
-  push @var_response, ["nextPageToken" => $next_token];
+  
   print  localtime() . " responding\n";
 
-  return (\@var_response);
+  return ({ "variants"      => \@var_response,
+            "nextPageToken" => $next_token
+          });
   
 }
 
@@ -305,7 +321,7 @@ sub get_next_by_token{
 
       ## position is zero-based + closed start of interval 
       $variation_hash->{start}           = $parser->get_raw_start -1;
-      ## open end of interval 
+      ## open end of interval
       $variation_hash->{end}             = $parser->get_raw_end;
 
       push @var, $variation_hash;

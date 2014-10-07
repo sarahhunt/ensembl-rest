@@ -104,17 +104,20 @@ sub fetch_callSets{
       }
       
       my $callset;
-      $callset->{sampleId} = $callset_id;
-      $callset->{id}       = $callset_id;
-      $callset->{name}     = $callset_id;
+      $callset->{sampleId}       = $callset_id;
+      $callset->{id}             = $callset_id;
+      $callset->{name}           = $callset_id;
+      $callset->{variantSetIds}  = [$hash->{individual_populations}->{$callset_id}->[0]]; 
+      $callset->{info}           = { "assembly_version" => "GRCh37"};
       push @callsets, $callset;
       $n++;
     }
   }
  
-  push @callsets, {"pageToken" => $newPageToken } if defined $newPageToken ;
+  my $return_data = { "callSets"  => \@callsets};
+  $return_data->{"pageToken"} = $newPageToken if defined $newPageToken ;
 
-  return (\@callsets);
+  return $return_data; 
   
 }
 
