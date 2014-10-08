@@ -133,7 +133,7 @@ sub get_req_file{
 
   if(defined $data->{variantSetIds}->[0]){
     if($data->{variantSetIds}->[0] == 65){
-      my $file =  "/home/vagrant/Genotypes/Illumina_platinum/NA12878_S1r.chr" . $data->{referenceName} . ".vcf.gz";
+      my $file =  "/home/vagrant/Genotypes/Illumina_platinum/NA12878_S1.chr" . $data->{referenceName} . ".vcf.gz";
       push @files, $file;
     }
     else{
@@ -194,8 +194,6 @@ sub fetch_by_region{
       last;
     }
   }
-  
-  print  localtime() . " responding\n";
 
   return ({ "variants"      => \@var_response,
             "nextPageToken" => $next_token

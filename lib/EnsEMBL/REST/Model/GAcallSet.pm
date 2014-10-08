@@ -80,13 +80,13 @@ sub fetch_callSets{
   my $config = JSON->new->decode($json_string) ||  
     $self->context()->go( 'ReturnError', 'custom', [ " Failed to parse config for variantSets"]); 
 
-  my $count_ind = 1;## for paging [!!put ids back]
+  my $count_ind = 0;## for paging [!!put ids back]
   foreach my $hash(@{$config->{collections}}) {
 
     ## loop over variantSets
-    foreach my $varSetId(keys %{$hash->{sets}}){
+    foreach my $varSetId( sort(keys %{$hash->{sets}}) ){
       ## limit by data set if required
-      next if defined  $data->{req_variantsets} &&  ! defined $data->{req_variantsets}->{ $hash->{varSetId} }; 
+      next if defined  $data->{req_variantsets} &&  ! defined $data->{req_variantsets}->{ $hash->{$varSetId} }; 
     }
 
     ## loop over callSets
@@ -94,15 +94,17 @@ sub fetch_callSets{
       
       ## limit by variant set if required
       next if defined $data->{req_variantsets} && ! defined $data->{req_variantsets}->{ $hash->{individual_populations}->{$callset_id}->[0] } ;
-
+ 
       ## paging
-      next if $count_ind <$next_ind_id;
       $count_ind++;
+      next if $count_ind <$next_ind_id;
+ 
       if (defined  $data->{pageSize}  &&  $data->{pageSize} =~/\w+/ && $n == $data->{pageSize}){
-        $newPageToken = $callset_id;
+        $newPageToken = $count_ind;
         last;
       }
       
+      ## save info
       my $callset;
       $callset->{sampleId}       = $callset_id;
       $callset->{id}             = $callset_id;
@@ -111,8 +113,10 @@ sub fetch_callSets{
       $callset->{info}           = { "assembly_version" => "GRCh37"};
       push @callsets, $callset;
       $n++;
+
     }
   }
+
  
   my $return_data = { "callSets"  => \@callsets};
   $return_data->{"pageToken"} = $newPageToken if defined $newPageToken ;
