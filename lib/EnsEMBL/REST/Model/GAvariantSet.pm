@@ -105,8 +105,8 @@ sub fetch_sets{
  
     ## paging
     next if $varset_id < $next_set_id;
- 
-    if (defined $data->{pageSize} && $n == $data->{pageSize}){
+
+    if ( $n == $data->{pageSize}){
       $newPageToken = $varset_id if defined $data->{pageSize} && $n == $data->{pageSize};
       last;
     }
@@ -118,6 +118,9 @@ sub fetch_sets{
     push @varsets, $varset;
     $n++;
   }
+
+  ## check there is something to return
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find any variantSets for this dataset id"]) if $n ==0;
  
   push @varsets, {"pageToken" => $newPageToken } if defined $newPageToken ;
 

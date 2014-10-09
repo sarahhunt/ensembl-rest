@@ -52,7 +52,9 @@ sub get_request: Chained('/') PathPart('variantsets') ActionClass('REST')  {
   my ( $self, $c ) = @_;
   my $post_data = $c->req->data;
 
-  $c->log->debug(Dumper $post_data);
+  #$c->log->debug(Dumper $post_data);
+  ## set a default page size if not supplied or not a number
+  $post_data->{pageSize} = 100 unless (defined  $post_data->{pageSize} &&  $post_data->{pageSize} =~ /\d+/);
 
   my $gavariantSet;
 
