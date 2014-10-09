@@ -86,7 +86,7 @@ sub fetch_callSets{
     ## loop over variantSets
     foreach my $varSetId( sort(keys %{$hash->{sets}}) ){
       ## limit by data set if required
-      next if defined  $data->{req_variantsets} &&  ! defined $data->{req_variantsets}->{ $hash->{$varSetId} }; 
+      next if defined  $data->{req_variantsets} &&  ! defined $data->{req_variantsets}->{$varSetId}; 
     }
 
     ## loop over callSets
