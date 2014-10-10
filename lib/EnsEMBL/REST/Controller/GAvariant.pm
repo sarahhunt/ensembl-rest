@@ -77,18 +77,14 @@ sub get_request: Chained('/') PathPart('variants') ActionClass('REST')  {
     unless exists $post_data->{variantSetIds}->[0];
 
 
-  $c->go( 'ReturnError', 'custom', [ ' key "pageSize" must be a positive number'])
-    if exists $post_data->{pageSize} && $post_data->{pageSize} <1;
-
   ## for compliance suite
   $post_data->{pageSize} =  $post_data->{maxResults}  if exists $post_data->{maxResults}; 
-  $post_data->{pageSize} = 10  unless exists $post_data->{pageSize};
 
-  ## DECIDE SENSIBLE LIMIT
-  $post_data->{maxResults} = 10  unless exists $post_data->{maxResults};
-
-
-  my $gavariant;
+  ## set a default page size if not supplied or not a number
+  $post_data->{pageSize} = 10 unless (defined  $post_data->{pageSize} &&  
+                                      $post_data->{pageSize} =~ /\d+/ &&
+                                      $post_data->{pageSize} >0  );
+ my $gavariant;
 
   try {
     $gavariant = $c->model('GAvariant')->fetch_gavariant($post_data);

@@ -34,7 +34,7 @@ POST requests : /callsets/
  "name": '' ,
  "callSetIds": [],
  "pageToken":  null,
- "maxResults": 10
+ "pageSize": 10
 }
 
 application/json
@@ -57,6 +57,13 @@ sub get_request: Chained('/') PathPart('callsets') ActionClass('REST')  {
   $c->log->debug(Dumper $post_data);
 
   my $gacallSet;
+
+  ## set a default page size if not supplied or not a number
+  $post_data->{pageSize} = 10 unless (defined  $post_data->{pageSize} &&  
+                                      $post_data->{pageSize} =~ /\d+/ &&
+                                      $post_data->{pageSize} >0  );
+
+
 
   try {
     $gacallSet = $c->model('GAcallSet')->fetch_ga_callSet($post_data);
