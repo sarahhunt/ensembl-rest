@@ -110,7 +110,7 @@ sub fetch_callSets{
       $callset->{id}             = $callset_id;
       $callset->{name}           = $callset_id;
       $callset->{variantSetIds}  = [$hash->{individual_populations}->{$callset_id}->[0]]; 
-      $callset->{info}           = { "assembly_version" => "GRCh37"};
+      $callset->{info}           = {"assembly_version" => ["GRCh37"]};
       push @callsets, $callset;
       $n++;
 
