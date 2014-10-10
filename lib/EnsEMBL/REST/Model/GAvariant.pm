@@ -78,6 +78,14 @@ sub get_set_info{
 
   foreach my $dataSet( @{$config->{collections}} ) {
 
+    ## check reference name is supported
+    my %avail_chr;
+    foreach my $chr ( @{$dataSet->{chromosomes}} ){
+      $avail_chr{$chr} = 1;
+    }
+    $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified reference sequence"])
+     unless defined $avail_chr{ $data->{referenceName} };
+
     ## loop over callSets
     foreach my $callset_id(keys %{$dataSet->{individual_populations}} ){
  
@@ -131,20 +139,25 @@ sub get_req_file{
 
   my @files; 
 
+  my $geno_dir = "/home/vagrant/Genotypes/";
+
   if(defined $data->{variantSetIds}->[0]){
     if($data->{variantSetIds}->[0] == 65){
-      my $file =  "/home/vagrant/Genotypes/Illumina_platinum/NA12878_S1.chr" . $data->{referenceName} . ".vcf.gz";
+      my $file =  "$geno_dir/Illumina_platinum/NA12878_S1.chr" . $data->{referenceName} . ".vcf.gz";
+      push @files, $file;
+    }
+    elsif($data->{variantSetIds}->[0] > 19 && $data->{variantSetIds}->[0] < 24){
+      my $file = "$geno_dir/1KG_data/ALL.chr" . $data->{referenceName} . ".phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz";
       push @files, $file;
     }
     else{
-      my $file = "/home/vagrant/Genotypes/1KG_data/ALL.chr" . $data->{referenceName} . ".phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz";
-      push @files, $file;
+       $self->context()->go( 'ReturnError', 'custom', [ " There is no data available for the specified variantSets"])
     }
   }
   else{
-    my $file1 =  "/home/vagrant/Genotypes/Illumina_platinum/NA12878_S1r.chr" . $data->{referenceName} . ".vcf.gz";
+    my $file1 =  "$geno_dir/Illumina_platinum/NA12878_S1r.chr" . $data->{referenceName} . ".vcf.gz";
     push @files, $file1;
-    my $file2 = "/home/vagrant/Genotypes/1KG_data/ALL.chr" . $data->{referenceName} . ".phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz";
+    my $file2 = "$geno_dir/1KG_data/ALL.chr" . $data->{referenceName} . ".phase1_release_v3.20101123.snps_indels_svs.genotypes.vcf.gz";
     push @files, $file2;
   } 
 
