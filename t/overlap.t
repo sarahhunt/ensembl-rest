@@ -85,6 +85,8 @@ my $base = '/overlap/region/homo_sapiens';
     source => 'ensembl',
     start => 1080164,
     strand => 1,
+    assembly_name => 'GRCh37',
+    version => '1',
   }, 'Checking structure of gene model as expected');
   
   my ($transcript) = grep { $_->{feature_type} eq 'transcript' } @{$json};
@@ -190,6 +192,7 @@ my $base = '/overlap/region/homo_sapiens';
   is(scalar(@{$json}), $expected_count, 'Expected variations at '.$region);
   eq_or_diff_data($json->[0],{
     start => 1001893,
+    assembly_name => 'GRCh37',
     end => 1001893,
     strand => 1,
     id => 'tmp__',
@@ -219,6 +222,7 @@ my $base = '/overlap/region/homo_sapiens';
   is(22, scalar(@{$json}), 'Searching for 22 repeats');
   eq_or_diff_data($json->[0], {
     start => 1000732,
+    assembly_name => 'GRCh37',
     end => 1000776,
     strand => 0, # YES DON'T CHANGE THIS; THEY DO NOT HAVE A STRAND
     description => 'dust',
@@ -232,6 +236,7 @@ my $base = '/overlap/region/homo_sapiens';
   my $region = '6:1020000..1030000';
   is_json_GET("$base/$region?feature=simple", [{
     start => 1026863,
+    assembly_name => 'GRCh37',
     end => 1027454,
     strand => -1,
     feature_type => 'simple',
@@ -245,11 +250,58 @@ my $base = '/overlap/region/homo_sapiens';
     [], 'Getting simple_feature no entries with bogus logic_name as JSON');
 }
 
+#Regulatory feature testing
+{
+  my $region = '6:1020000..1025449';
+  is_json_GET("$base/$region?feature=regulatory", [{
+    start => 1024250,
+    end => 1025449,
+    bound_start => 1024250,
+    bound_end => 1025449,
+    seq_region_name => '6',
+    strand => 0,
+    feature_type => 'regulatory',
+    ID => 'ENSR00001208657',
+    activity_evidence => 1,
+    description => "Predicted promoter flanking region",
+    cell_type => "MultiCell",
+  }], 'Getting regulatory_feature as JSON');
+}
+
+#Motif feature testing
+{
+  my $region = '6:1020000..1030000';
+  is_json_GET("$base/$region?feature=motif", [{
+    start => 1027627,
+    end => 1027634,
+    strand => 1,
+    feature_type => 'motif',
+    score => 0.942,
+    seq_region_name => '6',
+    binding_matrix => 'MA0281.1',
+    motif_feature_type => 'USF1'
+  }], 'Getting motif_feature as JSON');
+}
+
+#Segmentation feature testing
+{
+  my $region = '6:1020000..1020449';
+  is_json_GET("$base/$region?feature=segmentation;cell_type=K562", [{
+    start => 1019450,
+    end => 1020449,
+    feature_type => 'segmentation',
+    seq_region_name => '6',
+    cell_type => 'K562',
+    segmentation_feature_type => "Predicted heterochromatin",
+  }], 'Getting segmentation_feature as JSON');
+}
+
 #Misc feature
 {
   my $region = '6:1070000..1080000';
   my $thirty_k_feature = {
     start => 1040974,
+    assembly_name => 'GRCh37',
     end => 1216597,
     strand => 1,
     id => '',
@@ -268,6 +320,7 @@ my $base = '/overlap/region/homo_sapiens';
   is_json_GET("$base/$region?feature=misc", [
   {
     start => 1072318,
+    assembly_name => 'GRCh37',
     end => 1248050,
     strand => 1,
     id => '',
@@ -301,7 +354,7 @@ action_bad_regex(
   my @lines = filter_gff($gff);
   is(scalar(@lines), 1, '1 GFF line with 1 gene in this region');
   
-  my $gff_line = qq{6\tensembl\tgene\t1080164\t1105181\t.\t+\t.\tID=gene:ENSG00000176515;biotype=protein_coding;description=Uncharacterized protein%3B cDNA FLJ34594 fis%2C clone KIDNE2009109  [Source:UniProtKB/TrEMBL%3BAcc:Q8NAX6];external_name=AL033381.1;logic_name=ensembl};
+  my $gff_line = qq{6\tensembl\tgene\t1080164\t1105181\t.\t+\t.\tID=gene:ENSG00000176515;assembly_name=GRCh37;biotype=protein_coding;description=Uncharacterized protein%3B cDNA FLJ34594 fis%2C clone KIDNE2009109  [Source:UniProtKB/TrEMBL%3BAcc:Q8NAX6];external_name=AL033381.1;logic_name=ensembl;version=1};
   eq_or_diff($lines[0], $gff_line, 'Expected output gene line from GFF');
 }
 
@@ -311,7 +364,7 @@ action_bad_regex(
   my @lines = filter_gff($gff);
   is(scalar(@lines), 1, '1 GFF line with 1 repeat in this region');
   
-  my $gff_line = qq{6\twibble\trepeat_region\t1079386\t1079387\t.\t+\t.\tdescription=AluSq};
+  my $gff_line = qq{6\twibble\trepeat_region\t1079386\t1079387\t.\t+\t.\tassembly_name=GRCh37;description=AluSq};
   eq_or_diff($lines[0], $gff_line, 'Expected output repeat feature line from GFF');
 }
 

@@ -16,20 +16,30 @@ limitations under the License.
 
 =cut
 
-package EnsEMBL::REST::View::HTML;
-use Moose;
-use namespace::autoclean;
-use File::Spec;
-use Template::Stash::XS;
+package Plack::Middleware::EnsemblRestHeaders;
 
-extends 'Catalyst::View::TT';
+use strict;
+use warnings;
+use parent qw/Plack::Middleware/;
+use Plack::Util;
+use EnsEMBL::REST;
 
-__PACKAGE__->config(
-    TEMPLATE_EXTENSION => '.tt',
-    RENDER_DIE => 1,
-    WRAPPER => 'wrapper.tt',
-    COMPILE_DIR => File::Spec->catdir(File::Spec->tmpdir(), $ENV{USER}, 'ensrest', 'template_cache'),
-    STASH => Template::Stash::XS->new(),
-);
+=head2 call
+
+Adds Ensembl REST specific headers to the response. At the moment this is just the REST API's version.
+
+=cut
+
+sub call {
+  my $self = shift; 
+  my $res  = $self->app->(@_);
+
+  $self->response_cb($res, sub {
+  	my $local_res = shift;
+  	my $headers = $local_res->[1];
+  	Plack::Util::header_set($headers, 'X-Ensembl-REST-Version', $EnsEMBL::REST::VERSION);
+  	return;
+  });
+}
 
 1;

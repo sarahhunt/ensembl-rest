@@ -16,20 +16,22 @@ limitations under the License.
 
 =cut
 
-package EnsEMBL::REST::View::HTML;
+package EnsEMBL::REST::View::OrthoXML_homology;
 use Moose;
 use namespace::autoclean;
-use File::Spec;
-use Template::Stash::XS;
 
-extends 'Catalyst::View::TT';
+extends 'Catalyst::View';
 
-__PACKAGE__->config(
-    TEMPLATE_EXTENSION => '.tt',
-    RENDER_DIE => 1,
-    WRAPPER => 'wrapper.tt',
-    COMPILE_DIR => File::Spec->catdir(File::Spec->tmpdir(), $ENV{USER}, 'ensrest', 'template_cache'),
-    STASH => Template::Stash::XS->new(),
-);
+sub process {
+  my ($self, $c, $stash_key) = @_;
+  $c->res->body(${$self->encode_orthoxml($c, $stash_key)});
+  $self->set_content_disposition($c, 'xml', $stash_key);
+  $c->res->headers->header('Content-Type' => 'text/x-orthoxml+xml');
+  return 1;
+}
+
+with 'EnsEMBL::REST::Role::Homology';
+
+__PACKAGE__->meta->make_immutable;
 
 1;

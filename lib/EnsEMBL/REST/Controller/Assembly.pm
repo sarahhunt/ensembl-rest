@@ -39,9 +39,9 @@ sub info: Chained('species') PathPart('') Args(0) ActionClass('REST') {
   my $assembly_info;
   try {
     $assembly_info = $c->model('Assembly')->fetch_info(); 
-  }
-  catch {
-      $c->go( 'ReturnError', 'from_ensembl', [$_] );
+  } catch {
+    $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+    $c->go('ReturnError', 'custom', [qq{$_}]);
   };
   $self->status_ok( $c, entity => $assembly_info);
 }
@@ -60,6 +60,7 @@ sub seq_region: Chained('species') PathPart('') Args(1) ActionClass('REST') {
       assembly_exception_type => $slice->assembly_exception_type(),
       is_chromosome => $slice->is_chromosome(),
       karyotype_band => $bands,
+      assembly_name => $slice->coord_system()->version(),
     });
   } else {
     $self->status_ok( $c, entity => {
@@ -67,6 +68,7 @@ sub seq_region: Chained('species') PathPart('') Args(1) ActionClass('REST') {
       coordinate_system => $slice->coord_system()->name(),
       assembly_exception_type => $slice->assembly_exception_type(),
       is_chromosome => $slice->is_chromosome(),
+      assembly_name => $slice->coord_system()->version(),
     });
   }
 }

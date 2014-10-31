@@ -25,7 +25,7 @@ use Try::Tiny;
 require EnsEMBL::REST;
 
 BEGIN { extends 'Catalyst::Controller::REST'; }
-
+with 'EnsEMBL::REST::Role::PostLimiter';
 __PACKAGE__->config(
   map => {
     'text/html'           => [qw/View FASTAHTML/],
@@ -46,15 +46,10 @@ my %allowed_values = (
 
 my $DEFAULT_TYPE = 'genomic';
 
-sub id_GET { }
-
-sub id :Path('id') Args(1) ActionClass('REST') {
+sub id_GET { 
   my ($self, $c, $stable_id) = @_;
   $c->stash->{id} = $stable_id;
-  if ($c->request->param('mask') && $c->request->param('mask_feature')) {
-    $c->go('ReturnError', 'custom', [qq{'You cannot mask both repeats and features on the same sequence'}]);
-  }
-  
+
   try {
     $c->log()->debug('Finding the object');
     $c->model('Lookup')->find_object_by_stable_id($c->stash()->{id});
@@ -63,41 +58,92 @@ sub id :Path('id') Args(1) ActionClass('REST') {
     $c->log()->debug('Pushing out the entity');
     $self->_write($c);
   } catch {
-    $c->go('ReturnError', 'from_ensembl', [$_]);
+    $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+    $c->go('ReturnError', 'custom', [qq{$_}]);
   };
+}
+
+sub id :Path('id') ActionClass('REST') {
+  my ($self, $c, $stable_id) = @_;
+  $c->stash->{id} = $stable_id;
+  if ($c->request->param('mask') && $c->request->param('mask_feature')) {
+    $c->go('ReturnError', 'custom', [qq{'You cannot mask both repeats and features on the same sequence'}]);
+  }
   return;
 }
 
-sub region_GET { }
+sub id_POST { 
+  my ($self, $c) = @_;
+  my $post_data = $c->req->data;
+  my $id_list = $post_data->{'ids'};
+  $self->assert_post_size($c,$id_list);
+
+  my @errors;
+  $c->request->params->{'multiple_sequences'} = 1;
+  # Force multiple sequences on, since the user has undoubtedly submitted many things.
+  foreach my $id (@$id_list) {
+    try {
+      $c->model('Lookup')->find_object_by_stable_id($id);
+      $self->_process($c);
+    } ;
+  }
+  $self->_write($c);
+  if (@errors) { $c->go('ReturnError', 'custom', [join(',',@errors)]) };
+}
+
 
 sub get_species :Chained('/') PathPart('sequence/region') CaptureArgs(1) {
   my ($self, $c, $species) = @_;
   $c->stash()->{species} = $species;
 }
 
-sub region :Chained('get_species') PathPart('') Args(1) ActionClass('REST') {
+sub region_GET {
   my ($self, $c, $region) = @_;
-  if ($c->request->param('mask') && $c->request->param('mask_feature')) {
+  try {
+    $self->_get_region_sequence($c,$region);
+  } catch {
+    $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+    $c->go('ReturnError', 'custom', [qq{$_}]);
+  };
+  $self->_write($c);
+}
+
+sub region_POST {
+  my ($self, $c) = @_;
+  my $post_data = $c->req->data;
+  my $regions = $post_data->{'regions'};
+  $self->assert_post_size($c,$regions);
+  $c->request->params->{'multiple_sequences'} = 1; # required by _write to allow multiple hits.
+  my @errors;
+  foreach my $reg (@$regions) {
+    $c->log->debug($reg);
+    try {
+      $self->_get_region_sequence($c,$reg);
+    };
+  }
+  $self->_write($c);
+}
+
+sub region :Chained('get_species') PathPart('') ActionClass('REST') {
+  my ($self, $c) = @_;
+  if ($c->req->param('mask') && $c->req->param('mask_feature')) {
     $c->go('ReturnError', 'custom', [qq{'You cannot mask both repeats and features on the same sequence'}]);
   }
-  
-  try {
-    $c->log()->debug('Finding the Slice');
-    my $slice = $c->model('Lookup')->find_slice($region);
-    $slice = $self->_enrich_slice($c, $slice);
-    $c->log()->debug('Producing the sequence');
-    my $seq = $self->_mask_slice_features($slice, $c);
-    $c->stash()->{sequences} = [{
-      id => $slice->name(),
-      molecule => 'dna',
-      seq => $seq,
-    }];
-    $c->log()->debug('Pushing out the entity');
-    $self->_write($c);
-  } catch {
-    $c->go('ReturnError', 'from_ensembl', [$_]);
+}
+
+sub _get_region_sequence {
+  my ($self, $c, $region) = @_;
+  my $seq_stash = $c->stash()->{sequences};
+  my ($sr_name) = $c->model('Lookup')->decode_region( $region );
+  my $slice = $c->model('Lookup')->find_slice($region);
+  $slice = $self->_enrich_slice($c, $slice);
+  my $seq = $self->_mask_slice_features($slice, $c);
+  push @$seq_stash, {
+    id => $slice->name(),
+    molecule => 'dna',
+    seq => $seq,
   };
-  return;
+  $c->stash()->{sequences} = $seq_stash;
 }
 
 sub _process {
@@ -107,8 +153,7 @@ sub _process {
   my $type = $c->request()->param('type') || $DEFAULT_TYPE;
   my $multiple_sequences = $c->request->param('multiple_sequences');
   
-  $c->go('ReturnError', 'custom', ["The type '$type' is not understood by this service"]) unless $allowed_values{type}{$type};
-  
+  Catalyst::Exception->throw(qq{The type '$type' is not understood by this service}) unless $allowed_values{type}{$type};
   
   my $sequences = $self->_process_feature($c, $object, $type);
   my $sequence_count = scalar(@{$sequences});
@@ -120,12 +165,15 @@ sub _process {
     elsif($object->isa('Bio::EnsEMBL::Transcript') && ! $object->isa('Bio::EnsEMBL::PredictionTranscript') && $type eq 'protein') {
       $err = qq{Requesting a transcript and type "protein" can result in multiple sequences. $sequence_count sequences detected.};
     }
-    $c->go('ReturnError', 'custom', ["$err Please rerun your request and specify the multiple_sequences parameter"]) if $err;
+    Catalyst::Exception->throw(qq{$err Please rerun your request and specify the multiple_sequences parameter}) if $err;
   }
   if ($sequence_count == 0) {
-    $c->go('ReturnError', 'custom', ["No sequences returned, please check the type specified is compatible with the object requested"]);
+    Catalyst::Exception->throw(qq{No sequences returned, please check the type specified is compatible with the object requested});
   }
-
+  if (exists $s->{sequences}) {
+    my $existing_seq = $s->{sequences};
+    unshift @$sequences,@$existing_seq;
+  }
   $s->{sequences} = $sequences;
   return;
 }
@@ -269,11 +317,15 @@ sub _mask_slice_features {
 sub _write {
   my ($self, $c) = @_;
   my $s = $c->stash();
+  my $data = $s->{sequences};
+  if ((defined $data && scalar @$data == 0) || !defined $data) {
+    $self->status_not_found($c, message => 'No results found');
+  }
   if($c->request->param('multiple_sequences')) {
-    $self->status_ok($c, entity => $c->stash()->{sequences});
+    $self->status_ok($c, entity => $data);
   }
   else {
-    $self->status_ok($c, entity => $c->stash()->{sequences}->[0]);
+    $self->status_ok($c, entity => $data->[0]);
   }
 }
 

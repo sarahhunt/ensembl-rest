@@ -21,6 +21,7 @@ package EnsEMBL::REST::Model::Lookup;
 use Moose;
 use namespace::autoclean;
 use Try::Tiny;
+use Catalyst::Exception;
 
 extends 'Catalyst::Model';
 with 'Catalyst::Component::InstancePerContext';
@@ -42,21 +43,21 @@ sub find_genetree_by_stable_id {
   my $c = $self->context();
   my $compara_name = $c->request->parameters->{compara};
   my $reg = $c->model('Registry');
-  
+
   #Force search to use compara as the DB type
   $c->request->parameters->{db_type} = 'compara' if ! $c->request->parameters->{db_type};
-  
+
   #Try to do a lookup if the ID DB is there
   my $lookup = $reg->get_DBAdaptor('multi', 'stable_ids', 1);
   if($lookup) {
     my ($species, $object_type, $db_type) = $self->find_object_location($id);
     if($species) {
       my $gta = $reg->get_adaptor($species, $db_type, $object_type);
-      $c->go('ReturnError', 'custom', ["No adaptor found for ID $id, species $species, object $object_type and db $db_type"]) if ! $gta;
+      Catalyst::Exception->throw("No adaptor found for ID $id, species $species, object $object_type and db $db_type") unless $gta;
       $gt = $gta->fetch_by_stable_id($id);
     }
   }
-  
+
   #If we haven't got one then do a linear search
   if(! $gt) {
     my $comparas = $c->model('Registry')->get_all_DBAdaptors('compara', $compara_name);
@@ -67,23 +68,23 @@ sub find_genetree_by_stable_id {
     }
   }
   return $gt if $gt;
-  $c->go('ReturnError', 'custom', ["No GeneTree found for ID $id"]);
+  Catalyst::Exception->throw("No GeneTree found for ID $id");
 }
 
 sub find_genetree_by_member_id {
   my ($self,$id) = @_;
   my $c = $self->context();
-  my $compara_name = $c->request->parameters->{compara}; 
+  my $compara_name = $c->request->parameters->{compara};
   my $reg = $c->model('Registry');
- 
+
   my ($species, $object_type, $db_type) = $self->find_object_location($id);
-  $c->go('ReturnError', 'custom', ["Unable to find given object: $id"]) unless $species;
-  
+  Exception::Catalyst->throw("Unable to find given object: $id") unless $species;
+
   my $dba = $reg->get_best_compara_DBAdaptor($species,$compara_name);
   my $ma = $dba->get_GeneMemberAdaptor;
   my $member = $ma->fetch_by_stable_id($id);
-  $c->go('ReturnError', 'custom', ["Could not fetch GeneTree Member"]) unless $member;
-  
+  Exception->Catalyst->throw("Could not fetch GeneTree Member") unless $member;
+
   my $gta = $dba->get_GeneTreeAdaptor;
   my $gt = $gta->fetch_default_for_Member($member);
   return $gt;
@@ -95,7 +96,7 @@ sub find_compara_methods {
   my ($self, $class) = @_;
   my $c = $self->context();
   #default is "multi"
-  my $compara = $c->request->parameters->{compara} || 'multi'; 
+  my $compara = $c->request->parameters->{compara} || 'multi';
   my $reg = $c->model('Registry');
   my $compara_dba = $reg->get_DBAdaptor($compara, "compara");
   my $methods;
@@ -103,12 +104,12 @@ sub find_compara_methods {
     $methods = $compara_dba->get_MethodAdaptor->fetch_all_by_class_pattern($class);
   }
   else {
-    $methods = $compara_dba->get_MethodAdaptor->fetch_all(); 
+    $methods = $compara_dba->get_MethodAdaptor->fetch_all();
   }
   return $methods;
 }
 
-#Find all the species_sets for this method in the compara database 
+#Find all the species_sets for this method in the compara database
 sub find_compara_species_sets {
   my ($self, $method) = @_;
 
@@ -150,14 +151,14 @@ sub find_object {
   my $r = $c->request();
   my $reg = $c->model('Registry');
   $object_type = $r->param('object_type') if !$object_type;
-  $c->go('ReturnError', 'custom', [qq{Not possible to find the ID '$id' in this release; no species found}]) unless $species;
+  Catalyst::Exception->throw("ID '$id' not found") unless $species;
   my $adaptor = $reg->get_adaptor($species, $db_type, $object_type);
   $c->log()->debug('Found an adaptor '.$adaptor);
   if(! $adaptor->can('fetch_by_stable_id')) {
-    $c->go('ReturnError', 'custom', ["Object, $object_type, type's adaptor does not support fetching by a stable ID for ID '$id'"]);
+    Catalyst::Exception->throw("Object, $object_type, type's adaptor does not support fetching by a stable ID for ID '$id'");
   }
   my $final_obj = $adaptor->fetch_by_stable_id($id);
-  $c->go('ReturnError', 'custom', ["No object found for ID $id"]) unless $final_obj;
+  Catalyst::Exception->throw("No object found for ID $id") unless $final_obj;
   $c->stash()->{object} = $final_obj;
   return $final_obj;
 }
@@ -168,7 +169,7 @@ sub find_objects_by_symbol {
   my $c = $self->context();
   my $db_type = $c->request->param('db_type') || 'core';
   my $external_db = $c->request->param('external_db');
-  my @entries;  
+  my @entries;
   my @objects_to_try = $c->request->param('object_type') ? ($c->request->param('object_type')) : qw(gene transcript translation);
   foreach my $object_type (@objects_to_try) {
     my $object_adaptor = $c->model('Registry')->get_adaptor($c->stash->{'species'}, $db_type, $object_type);
@@ -191,10 +192,10 @@ sub find_objects_by_symbol {
       }
     }
   }
-  
+
   return \@entries;
 }
-  
+
 
 sub find_object_location {
   my ($self, $id, $no_long_lookup) = @_;
@@ -233,14 +234,37 @@ sub find_object_location {
       if ($use_archive) {
         my $reg = $c->model('Registry');
         my $lookup = $reg->get_DBAdaptor('multi', 'stable_ids', 1);
-        $c->go('ReturnError', 'custom', ["No lookup database available on server, archive lookup not possible for $id. Please contact the administrator of this server"]) if ! $lookup;
+        Catalyst::Exception->throw("No lookup database available on server, archive lookup not possible for $id. Please contact the administrator of this server") unless $lookup;
       }
+      Catalyst::Exception->throw("No object found for $id");
     }
   }
 
   $c->stash(species => $captures[0], object_type => $captures[1], group => $captures[2]);
 
   return @captures;
+}
+
+sub fetch_archive_by_id {
+  my ($self, $id) = @_;
+
+  my $c = $self->context();
+  my ($stable_id, $version) = split(/\./, $id);
+  my $archive;
+
+  my @results = $self->find_object_location($stable_id, undef, 1);
+  if (!defined $results[0]) {
+    Catalyst::Exception->throw("No object found for $stable_id");
+  }
+  my $species = $results[0];
+  my $adaptor = $c->model('Registry')->get_adaptor($species,'Core','ArchiveStableID');
+
+  if ($version) {
+    $archive = $adaptor->fetch_by_stable_id_version($stable_id, $version);
+  } else {
+    $archive = $adaptor->fetch_by_stable_id($stable_id);
+  }
+  $c->stash()->{archive} = $archive;
 }
 
 sub find_and_locate_object {
@@ -262,12 +286,30 @@ sub find_and_locate_object {
     } elsif ($input_type eq 'transcript') {
       $type = 'Exon';
     } else {
-      $c->go('ReturnError', 'custom',  ["Include option only available for Genes and Transcripts"]);
+      Catalyst::Exception->throw("Include option only available for Genes and Transcripts");
     }
     $features->{$type} = $self->$type($features->{id}, $species, $db_type);
   }
 
   return $features;
+}
+
+sub find_and_locate_list {
+  my ($self, $id_list, $no_long_lookup) = @_;
+  my $c = $self->context();
+  my %combined_list;
+  while (my $id = shift @$id_list) {
+    my $objs;
+    try {
+      $objs = find_and_locate_object($self,$id,$no_long_lookup);
+    }
+    catch {
+      $c->log->debug("No object found for ID $id");
+      # No objects found, report an empty variable
+    };
+    $combined_list{$id} = $objs;
+  }
+  return \%combined_list;
 }
 
 sub find_gene_by_symbol {
@@ -277,7 +319,7 @@ sub find_gene_by_symbol {
 
   my $gene_adaptor = $c->model('Registry')->get_adaptor($species, 'core', 'Gene');
   my $gene = $gene_adaptor->fetch_by_display_label($symbol);
-  $c->go('ReturnError', 'custom',  [qq{No valid lookup found for symbol $symbol}]) unless $gene;
+  Catalyst::Exception->throw(qq{No valid lookup found for symbol $symbol}) unless $gene;
   my $features = $self->features_as_hash($gene->stable_id, $species, 'Gene', 'core');
 
   my $expand = $c->request->param('expand');
@@ -288,6 +330,20 @@ sub find_gene_by_symbol {
   return $features;
 }
 
+sub find_genes_by_symbol_list {
+  my ($self, $list) = @_;
+  my %genes;
+  while (my $symbol = shift @$list) {
+    try {
+      my $gene = find_gene_by_symbol($self,$symbol);
+      $genes{$symbol} = $gene if $gene;
+    }
+    catch {
+      
+    };
+  }
+  return \%genes;
+}
 
 sub Transcript {
   my ($self, $id, $species, $db_type) = @_;
@@ -339,12 +395,15 @@ sub features_as_hash {
 # Not all features have all labels
 # Seq_region_name, start and end are available for genes, transcripts and exons but not translations
       $features->{seq_region_name} = $summary_hash->{seq_region_name} if defined $summary_hash->{seq_region_name};
+      $features->{assembly_name} = $summary_hash->{assembly_name} if defined $summary_hash->{assembly_name};
       $features->{start} = $summary_hash->{start} * 1 if defined $summary_hash->{start};
       $features->{end} = $summary_hash->{end} * 1 if defined $summary_hash->{end};
       $features->{strand} = $summary_hash->{strand} * 1 if defined $summary_hash->{strand};
 # Translations start and end are genomic coordinates
       $features->{start} = $summary_hash->{genomic_start} if defined $summary_hash->{genomic_start};
       $features->{end} = $summary_hash->{genomic_end} if defined $summary_hash->{genomic_end};
+# Translation length provided separately
+      $features->{length} = $summary_hash->{length} if defined $summary_hash->{length};
 # Display_name and description are available for genes and sometimes for transcripts
       $features->{display_name} = $summary_hash->{external_name} if defined $summary_hash->{external_name};
       $features->{description} = $summary_hash->{description} if defined $summary_hash->{description};
@@ -352,8 +411,11 @@ sub features_as_hash {
       $features->{biotype} = $summary_hash->{biotype} if defined $summary_hash->{biotype};
       $features->{source} = $summary_hash->{source} if defined $summary_hash->{source};
       $features->{logic_name} = $summary_hash->{logic_name} if defined $summary_hash->{logic_name};
+      if (lc($object_type) eq 'transcript') {
+        $features->{is_canonical} = $obj->is_canonical;
+      }
     } else {
-      $c->go('ReturnError','custom',[qq{ID '$id' does not support 'full' format type. Please use 'condensed'}]);
+      Catalyst::Exception->throw(qq{ID '$id' does not support 'full' format type. Please use 'condensed'});
     }
   }
 
@@ -369,12 +431,13 @@ sub find_slice {
   # or this
   my $db_type = $s->{db_type} || 'core';
   my $adaptor = $c->model('Registry')->get_adaptor($species, $db_type, 'slice');
-  $c->go('ReturnError', 'custom', ["Do not know anything about the species $species and core database"]) unless $adaptor;
+  Catalyst::Exception->throw("Do not know anything about the species $species and core database") unless $adaptor;
   my $coord_system_name = $c->request->param('coord_system') || 'toplevel';
+  Catalyst::Exception->throw("Coord_system $coord_system_name is not valid") if $coord_system_name !~ /^[A-Za-z]+$/;
   my $coord_system_version = $c->request->param('coord_system_version');
   my ($no_warnings, $no_fuzz, $ucsc_matching) = (undef, undef, 1);
   my $slice = $adaptor->fetch_by_location($region, $coord_system_name, $coord_system_version, $no_warnings, $no_fuzz, $ucsc_matching);
-  $c->go('ReturnError', 'custom', ["No slice found for location $region"]) unless $slice;
+  Catalyst::Exception->throw("No slice found for location $region") unless $slice;
   $s->{slice} = $slice;
   return $slice;
 }
@@ -383,12 +446,21 @@ sub decode_region {
   my ($self, $region, $no_warnings, $no_errors) = @_;
   my $c = $self->context();
   my $s = $c->stash();
+  ## Add sanity check before API call to avoid stack trace
+  my ($region_check, $start_check, $second_delimiter, $end_check, $strand_check) = $region =~ /^([0-9A-Z\.]+):?(-?[\w]*)(\.|_|-|:*)(-?[0-9A-Z]*):?(-?[0-9]?)/;
+  $start_check = 1 if !$start_check;
+  $end_check = $start_check+1 if !$end_check;
+  $strand_check = 1 if !$strand_check;
+  Catalyst::Exception->throw("Location $region not understood") unless $region_check;
+  Catalyst::Exception->throw("$start_check is not a valid start") if ($start_check < 0 || $start_check !~ /[0-9]+/);
+  Catalyst::Exception->throw("$end_check is not a valid end") if $end_check !~ /[0-9]+/;
+  Catalyst::Exception->throw("$strand_check is not a valid strand") if $strand_check !~ /^-?1$/;
   my $species = $s->{species};
   my $adaptor = $c->model('Registry')->get_adaptor($species, 'core', 'slice');
-  $c->go('ReturnError', 'custom', ["Do not know anything about the species $species and core database"]) unless $adaptor;
+  Catalyst::Exception->throw("Do not know anything about the species $species and core database")unless $adaptor;
   my ($sr_name, $start, $end, $strand) = $adaptor->parse_location_to_values($region, $no_warnings, $no_errors);
   $strand = 1 if ! defined $strand;
-  $c->go('ReturnError', 'custom', ["Could not decode region $region"]) unless $sr_name;
+  Catalyst::Exception->throw("Could not decode region $region") unless $sr_name;
   $s->{sr_name} = $sr_name;
   $s->{start} = $start;
   $s->{end} = $end;

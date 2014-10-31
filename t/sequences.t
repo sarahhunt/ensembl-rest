@@ -157,6 +157,25 @@ Catalyst::Test->import('EnsEMBL::REST');
   is(@{$json}, 10, 'Expect 10 CDNAs linked');
 }
 
+# Gene to protein text/plain multiple sequences (with and without param)
+{
+  my $id = 'ENSG00000112699';
+  my $url = "/sequence/id/${id}?type=protein;content-type=text/plain";
+  action_bad_regex(
+    $url,
+    qr/multiple_sequences parameter"}/, 
+    'Error when querying for text/plain sequence with a gene and asking for protein'
+  );
+
+  # Now for the good version. Check we have 2 sequences returned each on their own line
+  my $text = text_GET($url.';multiple_sequences=1', 'Retriving multiple sequences in text/plain');
+  my $fh = IO::String->new($text);
+  my @rows = <$fh>;
+  close $fh;
+  is(scalar(@rows), 2, 'Expect 2 lines of text coming from the service') or diag explain \@rows;
+}
+
+
 # DNA Region; good
 {
   my $region = '6:1080164-1105181';
@@ -228,6 +247,23 @@ NN
 FASTA
 
   is($expanded_fasta, $expanded_expected, 'FASTA formatting with 5 and 3 prime extensions');
+}
+
+{
+  my $url = "/sequence/id/";
+  my $body = q/{ "ids" : [ "ENSP00000370194", "ENSG00000243439" ]}/;
+  my $seq_a = q/XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXISFDLAEYTADVDGVGTLRLLDAVKTCGLINSVKFYQASTSELYGKVQEIPQKETTPFYPRSPYGAAKLYAYWIVVNFREAYNLFAVNGILFNHESPRRGANFVTRKISRSVAKIYLGQLECFSLGNLDAKRDWGHAKDYVEAMWLMLQNDEPEDFVIATGEVHSVREFVEKSFLHIGKTIVWEGKNENEVGRCKETGKVHVTVDLKYYRPTEVDFLQGDCTKAKQKLNWKPRVAFDELVREMVHADVELMRTNPNA/;
+  my $seq_b = q/GCCAGCCAGGGTGGCAGGTGCCTGTAGTCCCAGCTGCTTGGGAGGCTCAAGGATTGCTTGAACCCAGGAGTTCTGCCCTGCAGTGCGCGGTGCCCATCGGGTGACACCCATCAGGTATCTGCACTAAGTTCAGCATGAAGAGCAGCGGGCCACCAGGCTGCCTAAGAAGGAATGAACCAGCCTGCTTTGGAAACAGAGCAGCTGAAACTCCTGTGCCGATCAGTGGTGGGATCACACCTGTGAGTAGCCACGCCTGCCCAGGCAACACAGACCCTGTCTCTTGCAAAATTAAAAA/;
+  my $response = [{"desc" => undef,"id" => "ENSP00000370194","seq" => $seq_a,"molecule" => "protein"},{"desc" => "chromosome:GRCh37:6:1507557:1507851:1","id" => "ENSG00000243439","seq" => $seq_b,"molecule" => "dna"}];
+  is_json_POST($url,$body,$response,'Basic POST ID sequence fetch');
+
+}
+{
+  my $url = "/sequence/region/homo_sapiens";
+  my $body = q/{ "regions" : [ "6:1507557:1507851:1", "clearly stupid" ]}/;
+  my $expected = {id => "chromosome:GRCh37:6:1507557:1507851:1",seq => "GCCAGCCAGGGTGGCAGGTGCCTGTAGTCCCAGCTGCTTGGGAGGCTCAAGGATTGCTTGAACCCAGGAGTTCTGCCCTGCAGTGCGCGGTGCCCATCGGGTGACACCCATCAGGTATCTGCACTAAGTTCAGCATGAAGAGCAGCGGGCCACCAGGCTGCCTAAGAAGGAATGAACCAGCCTGCTTTGGAAACAGAGCAGCTGAAACTCCTGTGCCGATCAGTGGTGGGATCACACCTGTGAGTAGCCACGCCTGCCCAGGCAACACAGACCCTGTCTCTTGCAAAATTAAAAA",molecule =>"dna"};
+  is_json_POST($url,$body,$expected,'POST one good region request and one bad');
+
 }
 
 

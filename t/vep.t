@@ -25,9 +25,9 @@ BEGIN {
 
 use Test::More;
 use Test::Differences;
-use Catalyst::Test ();
 use Bio::EnsEMBL::Test::MultiTestDB;
 use Bio::EnsEMBL::Test::TestUtils;
+use Catalyst::Test ();
 
 my $dba = Bio::EnsEMBL::Test::MultiTestDB->new('homo_sapiens');
 my $multi = Bio::EnsEMBL::Test::MultiTestDB->new('multi');
@@ -59,6 +59,7 @@ my $vep_output =
   most_severe_consequence => "intron_variant",
   seq_region_name => "7",
   start => 86442404,
+  assembly_name => 'GRCh37',
   strand => 1,
   transcript_consequences =>
   [
@@ -242,6 +243,7 @@ $vep_output =
      input => '7  34381884  var1  C  T  . . .',
      most_severe_consequence => 'downstream_gene_variant',
      seq_region_name => '7',
+     assembly_name => 'GRCh37',
      start => 34381884,
      strand => 1,
      transcript_consequences => [
@@ -284,6 +286,7 @@ $vep_output =
   input => '7  86442404  var2  T  C  . . .',
   most_severe_consequence => "intron_variant",
   seq_region_name => "7",
+  assembly_name => 'GRCh37',
   start => 86442404,
   strand => 1,
   transcript_consequences =>
@@ -490,10 +493,10 @@ $vep_output =
   allele_string => "G/A/T",
   colocated_variants =>
   [{
-    afr_maf => 0,
     allele_string => "G/A/T",
-    amr_maf => "0.01",
+    afr_maf => 0,
     asn_maf => 0,
+    amr_maf => "0.01",
     clin_sig => [],
     end => 60403074,
     eur_maf => "0.0013",
@@ -523,6 +526,7 @@ $vep_output =
   ],
   most_severe_consequence => 'intergenic_variant',
   seq_region_name => '8',
+  assembly_name => 'GRCh37',
   start => 60403074,
   strand => 1
   }];
@@ -563,10 +567,10 @@ $vep_output =
   allele_string => "G/A/T",
   colocated_variants =>
   [{
-    afr_maf => 0,
     allele_string => "G/A/T",
-    amr_maf => "0.01",
+    afr_maf => 0,
     asn_maf => 0,
+    amr_maf => "0.01",
     clin_sig => [],
     end => 60403074,
     eur_maf => "0.0013",
@@ -597,6 +601,7 @@ $vep_output =
   ],
   most_severe_consequence => 'intergenic_variant',
   seq_region_name => '8',
+  assembly_name => 'GRCh37',
   start => 60403074,
   strand => 1,
   },
@@ -633,6 +638,7 @@ $vep_output =
     ],
     most_severe_consequence => 'intergenic_variant',
     seq_region_name => '4',
+    assembly_name => 'GRCh37',
     start => 32305409,
     strand => 1
   }];

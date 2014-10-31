@@ -16,7 +16,7 @@ limitations under the License.
 
 =cut
 
-package EnsEMBL::REST::Controller::Compara;
+package EnsEMBL::REST::Controller::Homology;
 use Moose;
 use namespace::autoclean;
 use Try::Tiny;
@@ -25,6 +25,17 @@ require EnsEMBL::REST;
 EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 
 BEGIN { extends 'Catalyst::Controller::REST'; }
+
+__PACKAGE__->config(
+  map => {
+    'text/x-orthoxml+xml' => [qw/View OrthoXML_homology/],
+  }
+);
+
+#We want to find every "non-special" format. To generate the regex used then invoke this command:
+#perl -MRegexp::Assemble -e 'my $ra = Regexp::Assemble->new; $ra->add($_) for qw(application\/json text\/javascript text\/xml ); print $ra->re, "\n"'
+my $CONTENT_TYPE_REGEX = qr/(?^:(?:text\/(?:javascript|xml)|application\/json))/;
+
 
 my $FORMAT_LOOKUP = { full => '_full_encoding', condensed => '_condensed_encoding' };
 my $TYPE_TO_COMPARA_TYPE = { orthologues => 'ENSEMBL_ORTHOLOGUES', paralogues => 'ENSEMBL_PARALOGUES', projections => 'ENSEMBL_PROJECTIONS', all => ''};
@@ -57,9 +68,9 @@ sub get_adaptors :Private {
       genomic_align_block_adaptor => $gaba,
       method_adaptor => $ma,
     );
-  }
-  catch {
-    $c->go('ReturnError', 'from_ensembl', [$_]);
+  } catch {
+    $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+    $c->go('ReturnError', 'custom', [qq{$_}]);
   };
 }
 
@@ -80,10 +91,10 @@ sub fetch_by_gene_symbol : Chained("/") PathPart("homology/symbol") Args(2)  {
     $c->request->param('object', 'gene');
     my $local_genes = $c->model('Lookup')->find_objects_by_symbol($gene_symbol);
     $genes = [grep { $_->slice->is_reference() } @{$local_genes}];
-  }
-  catch {
+  } catch {
     $c->log->fatal(qq{No genes found for external id: $gene_symbol});
-    $c->go('ReturnError', 'from_ensembl', [$_]);
+    $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+    $c->go('ReturnError', 'custom', [qq{$_}]);
   };
   unless ( defined $genes ) {
       $c->log->fatal(qq{Nothing found in DB for : [$gene_symbol]});
@@ -122,10 +133,10 @@ sub get_orthologs : Args(0) ActionClass('REST') {
     my $member = try { 
       $c->log->debug('Searching for gene member linked to ', $stable_id);
       $s->{gene_member_adaptor}->fetch_by_stable_id( $stable_id );
-    }
-    catch {
+    } catch {
       $c->log->error(qq{Stable Id not found id db: $stable_id});
-      $c->go( 'ReturnError', 'custom', [qq{stable id '$stable_id' not found}] );
+      $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+      $c->go('ReturnError', 'custom', [qq{$_}]);
     };
 
     if(! defined $member) {
@@ -153,14 +164,13 @@ sub get_orthologs : Args(0) ActionClass('REST') {
       else {
         $all_homologies = $ha->fetch_all_by_Member($member);
       }
-    }
-    catch {
-      $c->go('ReturnError', 'from_ensembl', [$_] );
+    } catch {
+      $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+      $c->go('ReturnError', 'custom', [qq{$_}]);
     };
-    my $encoded_homologies = $self->$target($c, $all_homologies, $stable_id);
     push(@final_homologies, {
       id => $stable_id,
-      homologies => $encoded_homologies,
+      homologies => $all_homologies,
     });
   }
   
@@ -258,11 +268,6 @@ sub _method_link_species_sets {
   return \@mlss;
 }
 
-sub get_orthologs_GET {
-  my ( $self, $c ) = @_;
-  $self->status_ok( $c, entity => { data => $c->stash->{homology_data} } );
-}
-
 sub _full_encoding {
   my ($self, $c, $homologies, $stable_id) = @_;
   my @output;
@@ -274,14 +279,17 @@ sub _full_encoding {
   my $encode = sub {
     my ($member) = @_;
     my $gene = $member->gene_member();
+    my $genome_db = $gene->genome_db();
+    my $taxon_id = $genome_db->taxon_id();
     my $result = {
       id => $gene->stable_id(),
-      species => $gene->genome_db()->name(),
+      species => $genome_db->name(),
       perc_id => ($member->perc_id()*1),
       perc_pos => ($member->perc_pos()*1),
       cigar_line => $member->cigar_line(),
       protein_id => $gene->get_canonical_SeqMember()->stable_id(),
     };
+    $result->{taxon_id} = ($taxon_id+0) if defined $taxon_id;
     if($aligned && $member->cigar_line()) {
       if($seq_type eq 'protein') {
         $result->{align_seq} = $member->alignment_string();
@@ -352,6 +360,29 @@ sub _decode_members {
   }
   return ($src, $trg);
 }
+
+sub get_orthologs_GET {
+  my ( $self, $c ) = @_;
+
+  if($self->is_content_type($c, $CONTENT_TYPE_REGEX)) {
+    my $format = $c->request->param('format') || 'full';
+    my $target = $FORMAT_LOOKUP->{$format};
+    foreach my $ref (@{$c->stash->{homology_data}}) {
+        $ref->{homologies} = $self->$target($c, $ref->{homologies}, $ref->{id});
+    }
+    return $self->status_ok( $c, entity => { data => $c->stash->{homology_data} } );
+
+  } else {
+    # Let's use the OrthoXML writer
+    my @homologies;
+    foreach my $ref (@{$c->stash->{homology_data}}) {
+      push @homologies, @{$ref->{homologies}};
+    }
+    return $self->status_ok($c, entity => \@homologies);
+  }
+}
+
+with 'EnsEMBL::REST::Role::Content';
 
 __PACKAGE__->meta->make_immutable;
 

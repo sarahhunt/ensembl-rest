@@ -29,14 +29,14 @@ use Bio::EnsEMBL::Funcgen::MotifFeature;
 use Bio::EnsEMBL::Funcgen::RegulatoryFeature;
 use Bio::EnsEMBL::Funcgen::BindingMatrix;
 
-
+use Try::Tiny;
 
 require EnsEMBL::REST;
+
 EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 BEGIN { 
   extends 'Catalyst::Controller::REST';
 }
-use Try::Tiny;
 
 has 'fasta_db' => (
   isa => 'Bio::DB::Fasta',
@@ -50,16 +50,15 @@ has 'fasta' => (
   is =>'ro'
 );
 
-has 'max_post_size' => (
-  isa => 'Int',
-  is => 'ro',
-  default => 1000
-);
+with 'EnsEMBL::REST::Role::PostLimiter';
 
 
 # /vep/:species
 sub get_species : Chained('/') PathPart('vep') CaptureArgs(1) {
   my ( $self, $c, $species ) = @_;
+  $c->stash->{species} = $c->model('Registry')->get_alias($species);
+  my $has_variation = $c->model('Registry')->get_adaptor( $species, 'Variation', 'Variation');
+  if (!$has_variation) { $c->go('ReturnError', 'custom', ["Species $species does not have any variation features"]); }
   try {
       $c->stash->{species} = $c->model('Registry')->get_alias($species);
       
@@ -70,14 +69,21 @@ sub get_species : Chained('/') PathPart('vep') CaptureArgs(1) {
       $c->stash( svfa => $c->model('Registry')->get_adaptor( $species, 'Variation', 'StructuralVariationFeature' ) );
       
       # get core adaptors
-      $c->stash( csa  => $c->model('Registry')->get_adaptor( $species, 'Core',      'CoordSystem' ) );
+      my $coord_system_adaptor = $c->model('Registry')->get_adaptor( $species, 'Core',      'CoordSystem' );
+      $c->stash->{assembly} = $coord_system_adaptor->get_default_version();
+      $c->stash( csa  => $coord_system_adaptor );
       $c->stash( ga   => $c->model('Registry')->get_adaptor( $species, 'Core',      'Gene' ) );
       $c->stash( sa   => $c->model('Registry')->get_adaptor( $species, 'Core',      'Slice' ) );
       
       # get regulatory adaptors
-      $c->stash($_.'_adaptor' => $c->model('Registry')->get_adaptor($species, 'Funcgen', $_)) for @REG_FEAT_TYPES;
+      my $is_funcgen = $c->model('Registry')->get_adaptor($species, 'Funcgen', 'CoordSystem');
+      if ($is_funcgen) {
+        $c->stash($_.'_adaptor' => $c->model('Registry')->get_adaptor($species, 'Funcgen', $_)) for @REG_FEAT_TYPES;
+      }
   } catch {
-      $c->go('ReturnError', 'from_ensembl', [$_]);
+      $c->log->fatal(qq{problem making Bio::EnsEMBL::Variation::VariationFeature object});
+      $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+      $c->go('ReturnError', 'custom', [qq{$_}]);
   };
   
   $c->log->debug('Working with species '.$species);
@@ -93,8 +99,13 @@ sub get_region : Chained('get_species') PathPart('region') ActionClass('REST') {
 
 sub get_region_GET {
   my ( $self, $c, $region ) = @_;
-  my ($sr_name) = $c->model('Lookup')->decode_region( $region, 1, 1 );
-  $c->model('Lookup')->find_slice( $sr_name );
+  try {
+    my ($sr_name) = $c->model('Lookup')->decode_region( $region, 1, 1 );
+    my $slice = $c->model('Lookup')->find_slice( $sr_name );
+  } catch {
+    $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+    $c->go('ReturnError', 'custom', [qq{$_}]);
+  };
   $self->status_ok( $c, entity => $region );
   $c->forward('get_allele');
 }
@@ -112,9 +123,7 @@ sub get_region_POST {
     $c->go( 'ReturnError', 'custom', [ ' Cannot find "variants" key in your POST. Please check the format of your message against the documentation' ] );
   }
   my @variants = @{$post_data->{variants}};
-  if (scalar(@variants) > $self->max_post_size) {
-    $c->go( 'ReturnError', 'custom', [ ' Batch size too big. Keep under '.$self->max_post_size.' variant lines per POST' ] );
-  }
+  $self->assert_post_size($c,\@variants);
 
   $self->_give_POST_to_VEP($c,\@variants, $config);
 }
@@ -148,12 +157,12 @@ sub _give_POST_to_VEP {
     $c->stash->{consequences} = $consequences;
 
     $self->status_ok( $c, entity => $consequences );
-  }
-  catch {
+  } catch {
     $c->log->fatal(qw{Problem Getting Consequences});
     $c->log->fatal($_);
     $c->log->fatal(Dumper $data);
-    $c->go( 'ReturnError', 'custom', [ qq{Problem entry within this batch: } . Dumper $data] );
+    $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+    $c->go('ReturnError', 'custom', [qq{$_}]);
   };
 }
 
@@ -171,13 +180,16 @@ sub get_allele : PathPart('') Args(2) {
         $c->go( 'ReturnError', 'custom', [$error_msg] );
     }
     my $reference_base;
+    $s->{end} = $s->{start} if !$s->{end};
+    $c->go('ReturnError', 'custom', ['Start or End cannot be negative']) if ($s->{start} < 0 || $s->{end} < 0);
+    $c->go('ReturnError', 'custom', ['Strand should be 1 or -1, not ' . $s->{strand}]) if $s->{strand} !~ /1/;
     try {
         $reference_base = $s->{slice}->subseq( $s->{start}, $s->{end}, $s->{strand} );
         $s->{reference_base} = $reference_base;
-    }
-    catch {
+    } catch {
         $c->log->fatal(qq{can't get reference base from slice});
-        $c->go( 'ReturnError', 'from_ensembl', [$_] );
+        $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+        $c->go('ReturnError', 'custom', [qq{$_}]);
     };
     $c->go( 'ReturnError', 'custom', ["request for consequence of [$allele] matches reference [$reference_base]"] )
       if $reference_base eq $allele;
@@ -189,10 +201,15 @@ sub get_allele : PathPart('') Args(2) {
     my $config = $self->_include_user_params($c,$user_config);
     $config->{format} = 'id'; # Set a format value to silence the VEP in single formatless requests.
     my $vf = $self->_build_vf($c);
-    my $consequences = $self->get_consequences($c, $config, [$vf]);
-    # $c->log->debug(Dumper $consequences);
-    $c->stash->{consequences} = $consequences;
-    $self->status_ok( $c, entity => $consequences );
+    try {
+      my $consequences = $self->get_consequences($c, $config, [$vf]);
+      # $c->log->debug(Dumper $consequences);
+      $c->stash->{consequences} = $consequences;
+    } catch {
+      $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+      $c->go('ReturnError', 'custom', [qq{$_}]);
+    };
+    $self->status_ok( $c, entity => $c->stash->{consequences} );
 }
 
 
@@ -218,13 +235,20 @@ sub get_id_GET {
     $_->{chr} = $_->seq_region_name;
   }
 
-  my $consequences = $self->get_consequences($c, $config, $vfs);
+  my $consequences;
+  try {
+    $consequences = $self->get_consequences($c, $config, $vfs);
+  } catch {
+    $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+    $c->go('ReturnError', 'custom', [qq{$_}]);
+  };
   $self->status_ok( $c, entity => $consequences );
 }
 
 sub get_consequences {
   my ($self, $c, $config, $vfs) = @_;
   my $user_config = $c->request->parameters;
+  $config->{assembly} = $c->stash->{assembly};
   my $version = $user_config->{version} || $config->{version} || 3;
   if ($version == 2) {
     delete $config->{rest};
@@ -253,9 +277,7 @@ sub get_id_POST {
     $c->go( 'ReturnError', 'custom', [ ' Cannot find "ids" key in your POST. Please check the format of your message against the documentation' ] );
   }
   my @ids = @{$post_data->{ids}};
-  if (scalar(@ids) > $self->max_post_size) {
-    $c->go( 'ReturnError', 'custom', [ ' Batch size too big. Keep under '.$self->max_post_size.' variant lines per POST' ] );
-  }
+  $self->assert_post_size($c,\@ids);
   $self->_give_POST_to_VEP($c,\@ids,$config);
 }
 
@@ -304,10 +326,10 @@ sub _build_vf {
             }
         );
       }
-    }
-    catch {
+    } catch {
         $c->log->fatal(qq{problem making Bio::EnsEMBL::Variation::VariationFeature object});
-        $c->go( 'ReturnError', 'from_ensembl', [$_] );
+        $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+        $c->go('ReturnError', 'custom', [qq{$_}]);
     };
   return $vf;
 }
@@ -318,7 +340,6 @@ sub _find_fasta_cache {
   my $fasta_db = Bio::DB::Fasta->new($self->fasta);
   return $fasta_db;
 }
-
 
 sub _new_slice_seq {
   # replacement seq method to read from FASTA DB
@@ -352,6 +373,7 @@ sub _include_user_params {
   
   # add adaptors
   $vep_params{$_} = $c->stash->{$_} for qw(va vfa svfa tva csa sa ga), map {$_.'_adaptor'} @REG_FEAT_TYPES;
+  if (!$c->stash->{'RegulatoryFeature'}) { delete $vep_params{regulatory}; };
 
  # $c->log->debug("After ".Dumper \%vep_params);
   return \%vep_params;

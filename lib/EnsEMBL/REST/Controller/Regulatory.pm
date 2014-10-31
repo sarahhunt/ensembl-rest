@@ -16,7 +16,7 @@ limitations under the License.
 
 =cut
 
-package EnsEMBL::REST::Controller::Variation;
+package EnsEMBL::REST::Controller::Regulatory;
 
 use Moose;
 use namespace::autoclean;
@@ -27,7 +27,7 @@ EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 
 =pod
 
-/variation/species/rs1333049
+/regulatory/species/ENSR00001348195
 
 application/json
 
@@ -36,7 +36,7 @@ application/json
 BEGIN {extends 'Catalyst::Controller::REST'; }
 
 
-sub species: Chained('/') PathPart('variation') CaptureArgs(1) {
+sub species: Chained('/') PathPart('regulatory') CaptureArgs(1) {
   my ( $self, $c, $species) = @_;
   $c->stash(species => $species);
 }
@@ -45,16 +45,19 @@ sub id_GET {}
 
 
 sub id: Chained('species') PathPart('') Args(1) ActionClass('REST') {
-  my ($self, $c, $id) = @_;
-  my $variation;
-  my $pops = $c->request->param('pops');
+  my $self = shift;
+  my $c    = shift;
+  my $id   = shift;
+  my $regf;
+#  my $pops = $c->request->param('pops');
+
   try {
-    $variation = $c->model('Variation')->fetch_variation($id);
+    $regf = $c->model('Regulatory')->fetch_regulatory($id);
   } catch {
     $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
     $c->go('ReturnError', 'custom', [qq{$_}]);
   };
-  $self->status_ok($c, entity => $variation);
+  $self->status_ok($c, entity => $regf);
 }
 
 
