@@ -26,7 +26,7 @@ use Data::Dumper;
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
-our $config_file = "/home/vagrant/src/ensembl-rest/ga_vcf_config.json"; 
+our $config_file = "ga_vcf_config.json"; 
 
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;

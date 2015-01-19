@@ -27,7 +27,7 @@ use Bio::EnsEMBL::IO::Parser::VCF4Tabix;
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
-our $config_file = "/home/vagrant/src/ensembl-rest/ga_vcf_config.json"; 
+our $config_file = "ga_vcf_config.json"; 
 
 
 sub build_per_context_instance {
@@ -234,7 +234,7 @@ sub sort_genotypes {
     my $gen_hash;
     $gen_hash->{callSetId}    = $sample;
     $gen_hash->{callSetName}  = $sample;
-    @{$gen_hash->{genotype}}  = split/\|/, $call;
+    @{$gen_hash->{genotype}}  = split/\||\//, $call;
    # @{$gen_hash->{genotypeLikelihood}}  = split/\|/, $qual if defined $qual;
 
     ## store genotypes by variationSetId
@@ -297,7 +297,7 @@ sub get_next_by_token{
     
     $parser->next();
     my $name = $parser->get_IDs->[0];
-
+    last unless defined $name ;
     ## add filter for variant name if require
     next if defined $data->{variantName} && $data->{variantName} =~/\w+/ &&  $data->{variantName} ne $name;
 
