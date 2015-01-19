@@ -54,7 +54,7 @@ sub get_request: Chained('/') PathPart('callsets') ActionClass('REST')  {
   my ( $self, $c ) = @_;
   my $post_data = $c->req->data;
 
-  $c->log->debug(Dumper $post_data);
+#  $c->log->debug(Dumper $post_data);
 
   my $gacallSet;
 

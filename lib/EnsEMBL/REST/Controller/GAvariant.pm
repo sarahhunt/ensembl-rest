@@ -57,7 +57,7 @@ sub get_request: Chained('/') PathPart('variants') ActionClass('REST')  {
   my ( $self, $c ) = @_;
   my $post_data = $c->req->data;
 
-  $c->log->debug(Dumper $post_data);
+#  $c->log->debug(Dumper $post_data);
 
   ## required by spec, so check early
   $c->go( 'ReturnError', 'custom', [ ' Cannot find "referenceName" key in your request' ] ) 
@@ -77,14 +77,16 @@ sub get_request: Chained('/') PathPart('variants') ActionClass('REST')  {
     unless exists $post_data->{variantSetIds}->[0];
 
 
-  ## for compliance suite
-  $post_data->{pageSize} =  $post_data->{maxResults}  if exists $post_data->{maxResults}; 
-
   ## set a default page size if not supplied or not a number
   $post_data->{pageSize} = 10 unless (defined  $post_data->{pageSize} &&  
                                       $post_data->{pageSize} =~ /\d+/ &&
                                       $post_data->{pageSize} >0  );
- my $gavariant;
+
+
+  ## set a maximum page size 
+  $post_data->{pageSize} =  1000 if $post_data->{pageSize} > 1000; 
+
+  my $gavariant;
 
   try {
     $gavariant = $c->model('GAvariant')->fetch_gavariant($post_data);
