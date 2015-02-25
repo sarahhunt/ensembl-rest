@@ -53,8 +53,12 @@ my $expected_data1 = {
         {                                         
           key => 'source_url',                    
           value => 'http://www.1000genomes.org/'  
-        }                                         
-      ]                                           
+        },                                         
+        { 
+          key => 'set_name',      
+          value => '1000GENOMES:phase_1:AFR'
+        } 
+       ]
     },                                            
     {                                             
       datasetId => '1',                           
@@ -71,7 +75,11 @@ my $expected_data1 = {
         {                                         
           key => 'source_url',                    
           value => 'http://www.1000genomes.org/'  
-        }                                         
+        },
+        {
+          key => 'set_name',
+          value => '1000GENOMES:phase_1:AMR'
+        } 
       ]                                           
     },                                            
     {                                             
@@ -96,6 +104,10 @@ my $expected_data2 = {
         {                                         
           key => 'source_url',                    
           value => 'http://www.1000genomes.org/'  
+        },
+        {
+          key => 'set_name',  
+          value => '1000GENOMES:phase_1:AFR'
         }                                         
       ]                                           
     },                                            
@@ -114,6 +126,10 @@ my $expected_data2 = {
         {                                         
           key => 'source_url',                    
           value => 'http://www.1000genomes.org/'  
+        },
+        {  
+          key => 'set_name',   
+          value => '1000GENOMES:phase_1:AMR' 
         }                                         
       ]                                           
     },                                            

@@ -21,12 +21,12 @@ package EnsEMBL::REST::Model::GAvariantSet;
 use Moose;
 extends 'Catalyst::Model';
 use Data::Dumper;
-
+use Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor;
 
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
-our $config_file = "ga_vcf_config.json"; 
+
 
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
@@ -37,35 +37,18 @@ sub fetch_ga_variantSet {
 
   my ($self, $data ) = @_;
 
-  ## is filtering by dataset id required
+  ## is filtering by dataset required?
   if(defined $data->{datasetIds}->[0]){
-
-    my %req_dataset;
-    foreach my $set ( @{$data->{datasetIds}} ){
-      $req_dataset{$set} = 1; 
+    foreach my $dataset ( @{$data->{datasetIds}} ){
+      $data->{req_datasets}->{$dataset} = 1; 
     }
-    $data->{req_datasets} = \%req_dataset;
   } 
 
-
-  ## is filtering by callset id required
-  if (exists $data->{callSetIds}){
-
-    $self->context()->go( 'ReturnError', 'custom', [ " No variantSets available which are not attached to callSets"])
-     if scalar @{$data->{callSetIds}} == 0;
-
-    my %req_callset;
-    foreach my $set ( @{$data->{callSetIds}} ){
-      $req_callset{$set} = 1;
-    }
-    $data->{req_callsets} = \%req_callset;
-  }
 
   ## extract required variant sets
   my $varsets = $self->fetch_sets($data);
 
   return ({"variantSets" => $varsets});
-
 
 }
 
@@ -77,76 +60,65 @@ sub fetch_sets{
   my $self = shift;
   my $data = shift;
 
-  ## ind_id to start from is appended to page token - start from 0 if none supplied
-  $data->{pageToken} = 0  unless ( defined $data->{pageToken} && $data->{pageToken} ne "");
-  my $next_set_id    = $data->{pageToken} ;
+  ## varset id to start from is the page token - start from 0 if none supplied
+  my $next_set_id = 0;
+  $next_set_id    = $data->{pageToken} if ( defined $data->{pageToken} && $data->{pageToken} ne "");
+
 
 
   ## read config
-  open my $cf, $config_file ||
-    $self->context()->go( 'ReturnError', 'custom', [ " Failed to find config to extract set ids variantSets"]);
-
-  local $/ = undef;
-  my $json_string = <$cf>;
-  close $cf;
-
-  my $config = JSON->new->decode($json_string) ||  
-    $self->context()->go( 'ReturnError', 'custom', [ " Failed to parse config for variantSets"]); 
-
+  $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
+  my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
 
   ## extract requested data
   my %variantSets;  
 
-  foreach my $hash(@{$config->{collections}}) {
-
+  foreach my $dataSet(@{$vca->fetch_all} ) {
+     $dataSet->use_db(0);
     ## limit by data set if required
-    next if defined  $data->{req_datasets} &&  ! defined $data->{req_datasets}->{ $hash->{datasetId} }; 
+    next unless !defined  $data->{req_datasets} || defined $data->{req_datasets}->{ $dataSet->id() }; 
 
     ## create summary of essential info for meta for the data set
     my @meta;
     foreach my $key ("assembly", "source_name", "source_url"){
       my %meta;
       $meta{key}   = $key;
-      $meta{value} = $hash->{$key};
-
+      $meta{value} = $dataSet->$key;
       push @meta, \%meta;
     }
 
-     ## check which variantSets contain the required callSet if filtering by callSet requested
-     my %required_varset;
-     if(defined $data->{req_callsets}){
-       foreach my $callSet (keys %{$hash->{individual_populations}}){
-         foreach my $variantSet (@{$hash->{individual_populations}->{$callSet}}){
-           $required_varset{$variantSet} = 1 if $data->{req_callsets}->{$callSet};
-        }
-      }
-    }
 
-    ## save variantSets by dataset 
-    foreach my $varset(keys %{$hash->{sets}}){
 
-      next if defined $data->{req_callsets}  && ! $required_varset{$varset};
 
-      $variantSets{$varset}{datasetId}   = $hash->{datasetId};
-      $variantSets{$varset}{varsetdesc}  = $hash->{sets}->{$varset};
-      $variantSets{$varset}{metadata}    = \@meta;
-      
+    ## loop through and save all available variantsets
+    foreach my $population (@{$dataSet->get_all_Populations}){
+      my $varset = $population->dbID();
+      $variantSets{$varset}{datasetId}   = $dataSet->id();
+      my @m = @meta;
+      my %m  = ( "key"   => "set_name", 
+                 "value" => $population->name()
+               );
+      push @m, \%m;
+      $variantSets{$varset}{metadata}    = \@m;
     }
   }
-  ## create response
+
+  ## create response with correct number of variantSets
   my @varsets;
   my $n = 0;
-  my $newPageToken; ## save id of next variationSet to start with
+  my $newPageToken; ## save id of next variantSet to start with
 
   foreach my $varset_id (sort (keys %variantSets)){    
-    
-    ## paging
+
+    ## paging - skip if already returned
     next if $varset_id < $next_set_id;
    
     if ( $n == $data->{pageSize}){
+      ## set next token and stop storing if page size reached
       $newPageToken = $varset_id if defined $data->{pageSize} && $n == $data->{pageSize};
       last;
     }
+    ## store varinatSet info to return
     my $varset;
     $varset->{id} = $varset_id;
     $varset->{datasetId} = $variantSets{$varset_id}->{datasetId};
@@ -157,7 +129,7 @@ sub fetch_sets{
   }
 
   ## check there is something to return
-  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find any variantSets for this dataset/callSet combination"]) if $n ==0;
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find any variantSets for this dataset"]) if $n ==0;
  
   push @varsets, {"pageToken" => $newPageToken } if defined $newPageToken ;
 

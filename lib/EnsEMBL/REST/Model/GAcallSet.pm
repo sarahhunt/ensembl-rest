@@ -21,15 +21,16 @@ package EnsEMBL::REST::Model::GAcallSet;
 use Moose;
 extends 'Catalyst::Model';
 use Data::Dumper;
-
+use Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor;
 
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
-our $config_file = "ga_vcf_config.json"; 
+
 
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
+
   return $self->new({ context => $c, %$self, @args });
 }
 
@@ -65,52 +66,45 @@ sub fetch_callSets{
   my $next_ind_id   =  $data->{pageToken} ;
 
   my @callsets;
-  my $n = 0;
+  my $n = 1;
   my $newPageToken; ## save id of next individual to start with
 
 
-   ## read config
-  open my $cf, $config_file ||
-    $self->context()->go( 'ReturnError', 'custom', [ " Failed to find config to extract set ids variantSets"]);
-
-  local $/ = undef;
-  my $json_string = <$cf>;
-  close $cf;
-
-  my $config = JSON->new->decode($json_string) ||  
-    $self->context()->go( 'ReturnError', 'custom', [ " Failed to parse config for variantSets"]); 
+  $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
+  my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
 
   my $count_ind = 0;## for paging [!!put ids back]
-  foreach my $hash(@{$config->{collections}}) {
+  foreach my $dataSet ( @{$vca->fetch_all} ){
 
     ## loop over variantSets
-    foreach my $varSetId( sort(keys %{$hash->{sets}}) ){
+    foreach my $varSetId( sort(keys %{$dataSet->{sets}}) ){
       ## limit by data set if required
       next if defined  $data->{req_variantsets} &&  ! defined $data->{req_variantsets}->{$varSetId}; 
     }
 
     ## loop over callSets
-    foreach my $callset_id( sort( keys %{$hash->{individual_populations}} ) ){
-      
+    $dataSet->{individual_populations} = $dataSet->{_raw_populations};
+    foreach my $callset_id( sort( keys %{$dataSet->{individual_populations}} ) ){
+     
+      last if defined  $newPageToken ;
+ 
       ## limit by variant set if required
-      next if defined $data->{req_variantsets} && ! defined $data->{req_variantsets}->{ $hash->{individual_populations}->{$callset_id}->[0] } ;
+      next if defined $data->{req_variantsets} && ! defined $data->{req_variantsets}->{ $dataSet->{individual_populations}->{$callset_id}->[0] } ;
  
       ## paging
       $count_ind++;
+      ## skip ind already reported
       next if $count_ind <$next_ind_id;
- 
-      if (defined  $data->{pageSize}  &&  $data->{pageSize} =~/\w+/ && $n == $data->{pageSize}){
-        $newPageToken = $count_ind;
-        last;
-      }
+      $newPageToken = $count_ind + 1  if (defined  $data->{pageSize}  &&  $data->{pageSize} =~/\w+/ && $n == $data->{pageSize});
+
       
       ## save info
       my $callset;
       $callset->{sampleId}       = $callset_id;
       $callset->{id}             = $callset_id;
       $callset->{name}           = $callset_id;
-      $callset->{variantSetIds}  = [$hash->{individual_populations}->{$callset_id}->[0]]; 
-      $callset->{info}           = {"assembly_version" => ["GRCh37"]};
+      $callset->{variantSetIds}  = [$dataSet->{individual_populations}->{$callset_id}->[0]]; 
+      $callset->{info}           = {"assembly_version" => [ $dataSet->assembly]};
       push @callsets, $callset;
       $n++;
 

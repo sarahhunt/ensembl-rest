@@ -39,19 +39,6 @@ my $post_data2 = '{ "pageSize": 2,  "variantSetIds":[65],"pageToken":"" }';
 my $expected_data1 = {                             
   callSets => [                
     {                          
-      id => 'NA12878',         
-      info => {                
-        assembly_version => [  
-          'GRCh37'             
-        ]                      
-      },                       
-      name => 'NA12878',       
-      sampleId => 'NA12878',   
-      variantSetIds => [       
-        '65'                   
-      ]                        
-    },                         
-    {                          
       id => 'HG00096',         
       info => {                
         assembly_version => [  
@@ -63,9 +50,22 @@ my $expected_data1 = {
       variantSetIds => [       
         '23'                   
       ]                        
+    },                         
+    {                          
+      id => 'HG00097',         
+      info => {                
+        assembly_version => [  
+          'GRCh37'             
+        ]                      
+      },                       
+      name => 'HG00097',       
+      sampleId => 'HG00097',   
+      variantSetIds => [       
+        '23'                   
+      ]                        
     }                          
   ],                           
-  pageToken => 3               
+  pageToken => 3              
 } ;
 
 my $expected_data2 = {
