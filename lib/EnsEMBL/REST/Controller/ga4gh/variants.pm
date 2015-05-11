@@ -28,7 +28,7 @@ EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 
 =pod
 
-POST requests : /ga4gh/variants/
+POST requests : /ga4gh/variants/search -d
 
 { "variantSetIds": [1],
  "variantName": '' ,
@@ -40,14 +40,15 @@ POST requests : /ga4gh/variants/
  "pageSize": 10
 }
 
-application/json
+GET requests: /ga4gh/variants/rs578140373
+
 
 =cut
 
 BEGIN {extends 'Catalyst::Controller::REST'; }
 
 
-sub get_request_POST {
+sub searchVariants_POST {
   my ( $self, $c ) = @_;
 
   my $post_data = $c->req->data;
@@ -82,7 +83,7 @@ sub get_request_POST {
                                       $post_data->{pageSize} =~ /\d+/ &&
                                       $post_data->{pageSize} >0  );
 
-## set a maximum page size 
+  ## set a maximum page size 
   $post_data->{pageSize} =  1000 if $post_data->{pageSize} > 1000; 
 
   my $gavariant;
@@ -98,9 +99,22 @@ sub get_request_POST {
 
 }
 
+sub searchVariants: Chained('/') PathPart('ga4gh/variants/search') ActionClass('REST') {}
 
-sub get_request: Chained('/') PathPart('ga4gh/variants') ActionClass('REST')  {
-  my ( $self, $c ) = @_;
+
+
+sub id: Chained('/') PathPart('ga4gh/variants') ActionClass('REST') {}
+
+sub id_GET {
+  my ($self, $c, $id) = @_;
+  my $variant;
+  try {
+    $variant = $c->model('ga4gh::variants')->getVariant($id);
+  } catch {
+    $c->go('ReturnError', 'from_ensembl', [qq{$_}]) if $_ =~ /STACK/;
+    $c->go('ReturnError', 'custom', [qq{$_}]);
+  };
+  $self->status_ok($c, entity => $variant);
 }
 
 

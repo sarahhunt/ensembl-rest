@@ -23,7 +23,10 @@ extends 'Catalyst::Model';
 
 use Bio::EnsEMBL::IO::Parser::VCF4Tabix;
 use Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor;
+use Bio::EnsEMBL::Variation::VariationFeature;
+use Bio::EnsEMBL::Variation::DBSQL::VariationFeatureAdaptor;
 
+use Data::Dumper;
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
@@ -249,6 +252,7 @@ sub get_next_by_token{
 
   ## which data set are we paging through?
   my @datasetsreq = sort(keys %{$data->{files}});
+  
   my $current_ds;
   foreach my $ds(@datasetsreq){
 
@@ -258,14 +262,15 @@ sub get_next_by_token{
     }
   }
   
+
   return unless defined $current_ds;
 
-  my $file = $self->{dir} .'/'. $data->{files}->{$current_ds};
+  my $file = $self->{geno_dir} .'/'. $data->{files}->{$current_ds};
 
   my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $file ) || die "Failed to get parser : $!\n";
   $parser->seek($data->{referenceName},$batch_start,$batch_end);
 
-  ## return these ordered by position & set id to allow pagination
+ # return these ordered by position & set id to allow pagination
   my @var;
 
   my $n = 0;
@@ -335,6 +340,114 @@ sub get_next_by_token{
   return (\@var,$current_ds) ;
 
 }
+
+=head2 getVariant
+
+  Gets a Variant by ID.
+  GET /variants/{id} will return a JSON version of Variant.
+
+=cut
+
+sub getVariant{
+
+  my ($self, $id ) = @_; 
+
+  my $c = $self->context();
+  my $species = "homo_sapiens"; 
+  my $varfeat;
+ 
+  my $va  = $c->model('Registry')->get_adaptor($species, 'Variation', 'Variation');
+  my $vfa = $c->model('Registry')->get_adaptor($species, 'Variation', 'VariationFeature');
+
+  $vfa->db->include_failed_variations(0); ## don't extract multi-mapping variants
+ 
+  my $var = $va->fetch_by_name($id);
+  my $vf  = $vfa->fetch_all_by_Variation($var) if defined $var;  
+
+  if (defined $vf->[0]) {
+    $varfeat = $vf->[0];
+    ## retrun 1KG data by default if available 
+    my $var_info = $self->getSingleCallSets($vf->[0], $id);
+ 
+    return ({ "variants"      => [$var_info]}) if defined $var_info;   
+  }
+  elsif($id =~/\w+\:c\.\w+|\w+\:g\.\w+|\w+\:p\.\w+/ ){
+    ## try to look up as HGVS
+    eval { $varfeat = $vfa->fetch_by_hgvs_notation( $id ) };
+  }
+  
+  $c->go( 'ReturnError', 'custom', [ " No variants are available with this id"])
+     unless defined $varfeat;  
+
+  ## return basic location info if available
+
+   my $variation_hash;
+
+   my @als = split/\//, $varfeat->allele_string();
+   shift @als; ## remove reference allele
+   $variation_hash->{name}            = $varfeat->variation_name();
+   $variation_hash->{id}              = $id;
+   $variation_hash->{referenceBases}  = $varfeat->ref_allele_string();
+   $variation_hash->{alternateBases}  = \@als;
+   $variation_hash->{referenceName}   = $varfeat->seq_region_name();
+
+   ## position is zero-based + closed start of interval 
+   $variation_hash->{start}           = $varfeat->seq_region_start() -1;
+   ## open end of interval
+   $variation_hash->{end}             = $varfeat->seq_region_end();
+
+   return ({ "variants"      => [$variation_hash]});
+}
+
+=head2 getSingleCallSets
+
+look up a default set of genotypes if queried by id
+
+=cut
+sub getSingleCallSets{
+
+ my ($self, $varfeat, $id ) = @_;
+
+  my $data;
+  $data->{referenceName} = $varfeat->seq_region_name();
+  $data->{start}         = $varfeat->seq_region_start() -1;
+  $data->{end}           = $varfeat->seq_region_end();
+  $data->{datasetIds}    = [1]; ## return 1KG by default
+  $data->{variantName}   = $id; ## check for supplied name not current database mane
+
+
+  ## load callSet to variantSet link 
+  $data = $self->get_set_info($data);
+
+  ## create fake token
+  $data->{pageToken} = $data->{start} . "_0_0";
+
+  my ($var_info, $next_ds) = $self->get_next_by_token($data);
+
+  ## exit if none found
+  $self->context()->go( 'ReturnError', 'custom', [ " No variants are available for this region" ] )
+     unless defined $var_info ;
+
+  return $var_info;
+
+}
+
+
+=head
+sub getGenotypesForSingleVariant{
+
+  my ($self, $data, $vf ) = @_;
+
+  my @datasetsreq = sort(keys %{$data->{files}});
+
+  foreach my $ds(@datasetsreq){
+  
+    my $file = $self->{dir} .'/'. $data->{files}->{$current_ds};
+
+    my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $file ) || die "Failed to get parser : $!\n";
+    $parser->seek($vf->seq_region_name() ,$vf->seq_region_start(), $vf->seq_region_end());
+
+=cut
 
 
 
