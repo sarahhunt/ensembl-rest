@@ -23,7 +23,7 @@ package EnsEMBL::REST::Model::ga4gh::annotate;
 use Moose;
 extends 'Catalyst::Model';
 use Time::HiRes qw(gettimeofday);
-use Bio::EnsEMBL::Variation::Utils::VEP qw( get_version_data get_all_consequences vf_to_consequences vf_list_to_cons parse_line validate_vf read_cache_info );
+use Bio::EnsEMBL::Variation::Utils::VEP qw( get_version_data get_all_consequences vf_to_consequences parse_line read_cache_info );
 use Bio::DB::Fasta;
 use Data::Dumper;
 use Bio::EnsEMBL::IO::Parser::VCF4Tabix;
