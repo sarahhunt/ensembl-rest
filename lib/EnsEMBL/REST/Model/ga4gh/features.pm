@@ -133,6 +133,35 @@ sub extractFeaturesBySegment{
 }
 
 
+## support more feature types..
+sub getFeature{
+
+  my $self = shift;
+  my $id   = shift;
+
+  return $self->getTranscript($id);
+}
+
+## look up transcript by id
+## FIX: to use UUID
+
+sub getTranscript{
+
+  my $self = shift;
+  my $id   = shift;
+
+  my $tra = $self->context->model('Registry')->get_adaptor($species, 'Core', 'Transcript');
+  my $tr = $tra->fetch_by_stable_id( $id );
+
+  $self->context->go( 'ReturnError', 'custom', [ ' Cannot find transcript feature for id ' . $id ] )
+    unless defined $tr ;
+
+  return ({ features => [$self->formatTranscript($tr) ]});
+
+}
+
+## turn ensembl transcript into GA4GH transcript
+
 sub formatTranscript{
 
   my $self = shift;
