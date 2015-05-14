@@ -35,6 +35,9 @@ POST requests : /ga4gh/variantannotations/search -d
  "referenceName": 7,
  "start":  140419275,
  "end": 140429275,
+ "features" : [ "id": "ENST00000450305",
+                "featureType": {"source":"SO","name":"transcript","id":"SO:0000673"}}],
+ "effects"  : [ {"source":"SO","name":"missense_variant","id":"SO:0001583"}]         
  "pageToken":  null,
  "pageSize": 10
 }
