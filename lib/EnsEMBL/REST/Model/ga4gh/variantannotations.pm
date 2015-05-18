@@ -39,9 +39,6 @@ has 'context' => (is => 'ro');
 
 ## handle genes as well as transcripts
 
-## paging forever issue if rare consequence - seek by constraint?
-
-## check effects are valid else page for ever
  
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
@@ -59,9 +56,12 @@ sub searchVariantAnnotations {
   $data->{required_features} = $self->extractRequired( $data->{features}, 'features') if $data->{features}->[0];
   $data->{required_effects}  = $self->extractRequired( $data->{effects}, 'SO' )       if $data->{effects}->[0];
   #print "Input: "; print Dumper $data;
+
+  ## loop over features if supplied
   return $self->searchVariantAnnotations_by_features( $data)
     if exists $data->{features}->[0];
 
+  ## search by region otherwise
   return $self->searchVariantAnnotations_by_region( $data)
     if exists $data->{start};
 
@@ -75,7 +75,7 @@ sub searchVariantAnnotations {
 sub searchVariantAnnotations_by_features {
 
   my ($self, $data ) = @_;
-print "In searchVariantAnnotations_by_features with page token $data->{pageToken}\n";
+
   ## return values
   my @annotations;
   my $nextPageToken;
@@ -99,13 +99,14 @@ print "In searchVariantAnnotations_by_features with page token $data->{pageToken
   ## extract one transcripts worth at once for paging
   ## should records be merged where transcripts overlap??
   foreach my $req_feat ( @{$data->{features}} ){
-    print "Starting to look for feature $req_feat->{id} ok_trans is $ok_trans\n";
+#    print "Starting to look for feature $req_feat->{id} ok_trans is $ok_trans\n";
     $ok_trans = 1 if defined $current_trans && $req_feat->{id} eq $current_trans;
     next unless $ok_trans == 1;
 
-    ## FIX: silent fail 
-    next unless $req_feat->{featureType}->{name} eq "transcript";
-      
+    ## may have no annotations if a transcript & consequence specified
+    $self->context->go('ReturnError', 'custom', [" No annotations available for this feature type: " . $req_feat->{featureType}->{name} ])
+      unless $req_feat->{featureType}->{name} eq "transcript";
+
     my $transcript = $tra->fetch_by_stable_id( $req_feat->{id} );  
     $c->go('ReturnError', 'custom', [" feature $req_feat->{id} not found"])
       if !$transcript;
@@ -113,36 +114,49 @@ print "In searchVariantAnnotations_by_features with page token $data->{pageToken
     my $tvs;
     if(exists $data->{required_effects}){
       my @cons_terms = (keys %{$data->{required_effects} });
-      $tvs = $tva->fetch_all_by_Transcripts_SO_terms([$transcript, \@cons_terms ]);	
+
+      my $constraint = " tv.consequence_types IN (";
+      foreach my $cons(@cons_terms){ $constraint .= "\"$cons\",";}
+      $constraint =~ s/\,$/\)/;
+
+#      print "Limiting effects for feature to : $constraint\n";
+      $tvs = $tva->fetch_all_by_Transcripts_with_constraint([$transcript], $constraint );	
     }
     else{
       $tvs = $tva->fetch_all_by_Transcripts([$transcript]);
     }
 
+
+    next unless scalar(@{$tvs}) > 0; 
+
     ## create an annotation record at the variation_feature level
     foreach my $tv (@{$tvs}){
 
       my $pos = $tv->variation_feature->seq_region_start();
+      ## skip if already returned
       next if defined $next_pos && $pos < $next_pos;
-      last if defined $nextPageToken ;      
+
+      if($running_total == $data->{pageSize}){
+        $nextPageToken = $req_feat->{id} . "_" . $pos;
+        last;
+      }
 
       my $var_ann;
-      $var_ann->{variantId} = $tv->variation_feature->variation_name();
-print "Checking annot for $var_ann->{variantId}\n";
-      $var_ann->{annotationSetId} = 'Ensembl_79';
-      $var_ann->{created} = 'FIXME_release_date';
 
+      ## get consequences for each alt allele
       my $tvas = $tv->get_all_alternate_TranscriptVariationAlleles();
       foreach my $tva(@{$tvas}) {
-        if($running_total == $data->{pageSize}){
-          $nextPageToken = $req_feat->{id} . "_" . $pos;
-          last;
-        } 
         my $ga_annotation  = $self->formatTVA( $tva, $tv ) ;
         push @{$var_ann->{transcriptEffects}}, $ga_annotation;
-        $running_total++;
       }
-     push @annotations, $var_ann;
+      ## don't count or store until TV available
+      next unless exists $var_ann->{transcriptEffects};
+
+      $running_total++;
+      $var_ann->{variantId} = $tv->variation_feature->variation_name();
+      $var_ann->{annotationSetId} = 'Ensembl_79';
+      $var_ann->{created} = 'FIXME_release_date';
+      push @annotations, $var_ann;
     }
   }
 
@@ -170,7 +184,7 @@ sub searchVariantAnnotations_by_region {
   
   my $location = "$data->{referenceName}\:$start\-$data->{end}";
   my $slice = $sla->fetch_by_toplevel_location($location);
-#  print "Looking by region : $location\n";
+
   $c->go('ReturnError', 'custom', ["sequence $location available for this assembly"])
    if !$slice;
 
@@ -199,19 +213,21 @@ sub extractVFbySlice{
   my $vfs;
   if( exists $data->{required_effects}){
     my @cons_terms = (keys %{$data->{required_effects} });
-print "Sending in effects : " ; print Dumper @cons_terms;
-    #$vfs = $vfa->fetch_all_by_Slice_SO_terms($slice, \@cons_terms);
-    my $constraint = " vf.consequence_types IN (";
-    foreach my $cons(@cons_terms){ $constraint .= "\"$cons\",";}
-    $constraint =~ s/\,$/\)/;
+
+    my $constraint; 
+    foreach my $cons(@cons_terms){ 
+      $constraint .= "vf.consequence_types like \"%$cons\%\" and ";}
+    $constraint =~ s/and $//;
+#    print "limiting over region with $constraint\n";
     $vfs = $vfa->fetch_all_by_Slice_constraint($slice, $constraint);
   }
   else{
      $vfs = $vfa->fetch_all_by_Slice($slice);
   }
+
   my $next_pos; ## save this for paging
   foreach my $vf(@{$vfs}){
-    warn "seeking annot for " . $vf->variation_name() . "\n";
+#    warn "seeking annot for " . $vf->variation_name() . " count is $count\n";
     ## use next variant location as page token
     if ($count == $data->{pageSize}){
       $next_pos = $vf->seq_region_start();
@@ -223,8 +239,8 @@ print "Sending in effects : " ; print Dumper @cons_terms;
 
     ## extract & format - may not get a result if filtering applied
     my $var_an = $self->fetchByVF($vf, $data);
-    if (defined $var_an && $var_an ne ''){
-      push @response, $var_an if defined $var_an;
+    if (exists $var_an->{variantId}){
+      push @response, $var_an ;
       $count++;
     }
   }
@@ -247,9 +263,9 @@ sub fetchByVF{
   $var_ann->{created} = 'FIXME_release_date';
 
   my $tvs =  $vf->get_all_TranscriptVariations();
+  return undef unless scalar(@{$tvs} > 0);
 
   foreach my $tv (@{$tvs}){   
-
 
     ## check if a feature list was specified
     next if scalar @{$data->{features}}>0 && !exists $data->{required_features}->{ $tv->transcript()->stable_id()} ; 
