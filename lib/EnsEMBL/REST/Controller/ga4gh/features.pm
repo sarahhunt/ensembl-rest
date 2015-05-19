@@ -55,7 +55,7 @@ sub searchFeatures_POST {
 
   ## required by spec, so check early
   $c->go( 'ReturnError', 'custom', [ ' Cannot find "parentIds" or "featureSetIds" key in your request' ] )
-    unless exists $post_data->{parentIds} || defined $post_data->{featureSetIds};
+    unless exists $post_data->{parentIds} || exists $post_data->{featureSetIds};
 
   ## set a default page size if not supplied or not a number
   $post_data->{pageSize} = 100 unless (defined  $post_data->{pageSize} &&
