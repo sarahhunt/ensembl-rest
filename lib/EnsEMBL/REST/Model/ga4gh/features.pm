@@ -35,21 +35,27 @@ our $species = 'homo_sapiens';
 ## Switch to VEP cache for speed?
 ## What features to return?
 
+## FIX: pagination over multiple regions
+
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
   return $self->new({ context => $c, %$self, @args });
 }
 
+## potential weirdness:
+##  next token is: 
+##     - numerically sorted transcript dbID in 'all' mode
+##     - seq & pos start if in region mode
+
 sub searchFeatures {
 
   my ($self, $data ) = @_; 
-
-  ## check feature type (ontology terms) supported
+print localtime () . " Starting\n "; 
+  ## check feature type (ontology terms) is supported
   ## initially default to transcripts only
   my $type_problem;
   if (exists $data->{features} ){
     foreach my $ontolterm (@{$data->{features}}){
-      print "Requesting feature $ontolterm->{name}\n";
       $type_problem = $ontolterm->{name}  unless $ontolterm->{name} eq 'transcript';
     }
   }
@@ -60,69 +66,106 @@ sub searchFeatures {
   my $features;
   my $nextToken;
 
-  if( exists $data->{range}){ ## is a specific path defined?
-    foreach my $segment ( @{$data->{range}} ){
+  if( exists $data->{range}){
+    ## extract specific region(s) if requested
 
-      ($features, $nextToken) = $self->extractFeaturesBySegment($data, $segment);
+    foreach my $segment ( @{$data->{range}} ){
+      #print "using requested region\n";
+      my $rangefeatures;
+      ($rangefeatures, $nextToken) = $self->extractFeaturesBySegment($data, $segment);
+      push @{$features}, @{$rangefeatures};
       last if defined $nextToken;
     }
   }
   else{
-    ## default initial values
-    my $next_seq_start = 1; 
-    my $next_pos_start = 1;
-
-    ## or take from token
-    ($next_seq_start, $data->{from}) = split/\_/, $data->{pageToken} if defined $data->{pageToken};
-     
-    ## fudge a segment
-    my $segment;
-    ### Don't expect ids yet    $segment->{start}->{base}->{sequenceID} 
-    $segment->{start}->{base}->{referenceName} = $next_seq_start;
-    $segment->{start}->{base}->{position}      = $data->{from};
-    $segment->{length}                         = 100000;   ## what is a sensible default slice length??
-    ($features, $nextToken) = $self->extractFeaturesBySegment($data, $segment);
+    ## page through everything in the database
+    ($features, $nextToken) = $self->extractAllFeatures($data);
   }
-
+print localtime () . " Ending\n ";
   ## FIX: may not have a nextToken
   return ({ features     => $features, 
-            nextPageToken => $nextToken}); 
+            nextPageToken => $nextToken});
+
+}
+
+sub extractAllFeatures{
+
+  my $self = shift;
+  my $data = shift;
+
+
+  ## take from db in transcript_id order if all requested
+  my $tra = $self->context->model('Registry')->get_adaptor($species, 'Core', 'Transcript');
+
+  my $get_id_sth = $tra->prepare(qq[ select transcript_id 
+                                     from transcript
+                                     where transcript_id >? 
+                                     order by transcript_id
+                                     limit ?    
+                                  ]);
+
+  my $next_trans = $data->{pageToken} || 0;
+  my $limit      = $data->{pageSize};
+ 
+
+  $get_id_sth->execute($next_trans, $limit );        
+  my $trans_dbID =  $get_id_sth->fetchall_arrayref();
+
+  my @featurelist;
+  foreach my $dbID (@{$trans_dbID}){ 
+    push @featurelist, $dbID->[0];
+  }
+
+  ## save last db id to start from next time
+  my $last = pop @{$trans_dbID};
+  my $nextToken = $last->[0];
+
+  my $transcripts = $tra->fetch_all_by_dbID_list(\@featurelist);
+
+  my $features; 
+  foreach my $transcript (@{$transcripts}){
+    my $gafeature =  $self->formatTranscript($transcript, $data) ;
+    push @{$features}, $gafeature;
+  }
+
+  return ($features,  $nextToken); 
 
 }
 
 
-## extract data from db
+
+## extract data from db by region
 sub extractFeaturesBySegment{
 
   my ($self, $data, $segment ) = @_;
 
-  ## db stuff
   my $sla = $self->context->model('Registry')->get_adaptor($species, 'Core', 'Slice');
   my $tra = $self->context->model('Registry')->get_adaptor($species, 'Core', 'Transcript');
 
 
   my @features;
   my $nextPageToken;
+  my $count = 0;
+
+  ##fix paging for multiple regions if required
+  my ($next_seq_start, $next_seq_pos ) = split/\_/, $data->{pageToken} if defined $data->{pageToken};
 
   my $end = $segment->{start}->{base}->{position} + $segment->{length};
   my $location = "$segment->{start}->{base}->{referenceName}\:$segment->{start}->{base}->{position}\-$end";
   my $slice = $sla->fetch_by_toplevel_location( $location );
-  print "Using slice for location : $location\n";
+  #print "Using slice for location : $location\n";
   my $transcripts = $tra->fetch_all_by_Slice( $slice ) ;
-  
-  my $count = 0;
+
   foreach my $tr (@{$transcripts}){
 
     ## if pageSize reached save next position & return
-    if ($count == $data->{pageSize}){
-      print "Next trans should be : ". $tr->stable_id() ."\n";
+    if ($count == $data->{pageSize}){ 
       $nextPageToken = $tr->seq_region_name() . "_" . $tr->seq_region_start();
       last;
     }
     
-    next if exists $data->{pageToken} && $data->{from} > $tr->seq_region_start();
+    next if exists $data->{pageToken} &&  $next_seq_pos > $tr->seq_region_start();
  
-    print "Transcript $count: ". $tr->stable_id() ."\n";
     my $gafeat = $self->formatTranscript($tr, $data);
     push @features,  $gafeat;
     ## keep count for pageSize
