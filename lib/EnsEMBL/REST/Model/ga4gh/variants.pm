@@ -420,6 +420,7 @@ sub getSingleCallSets{
   $data = $self->get_set_info($data);
 
   ## create fake token
+  $data->{pageSize} = 0;
   $data->{pageToken} = $data->{start} . "_0_0";
 
   my ($var_info, $next_ds) = $self->get_next_by_token($data);
