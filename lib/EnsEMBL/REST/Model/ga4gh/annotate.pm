@@ -66,7 +66,10 @@ sub annotateVariants{
   ## create VEP config 
   my $config = $self->create_config();
 
-  my $vep_version = get_version_data($config);
+## FIX get all version info 
+#  my $vep_version = get_version_data($config);
+
+  my $creationtime =  int (gettimeofday * 1000);
 
 
   foreach my $gavar (@{$data->{variants}}){
@@ -82,7 +85,7 @@ sub annotateVariants{
     my $var_annotation;
     ## copy id from input variant
     $var_annotation->{id}      = $gavar->{id};
-    $var_annotation->{created} = int (gettimeofday * 1000); 
+    $var_annotation->{created} = $creationtime ; 
 
     ##save colocated 
     my $existing_var;
@@ -94,7 +97,7 @@ sub annotateVariants{
 
       my $ga_annotation; 
 
-      $ga_annotation->{id}       = "placeholder_annot_id";
+      $ga_annotation->{id}       = "ph_" .$gavar->{id} . "_" . $ann->{Feature};
 
       $ga_annotation->{annotationSetId}  = 'Ensembl_79_GRCh37'; ## derive from version
       $ga_annotation->{feature}  = $ann->{Feature};
@@ -105,10 +108,10 @@ sub annotateVariants{
 
       $ga_annotation->{feature}  = $ann->{Feature};
       my $hgvsg = $vf->[0]->get_all_hgvs_notations('', 'g') ;
-      $ga_annotation->{HGVSg}    = $hgvsg->{$ann->{Allele}};	
+      $ga_annotation->{HGVSg}    = $hgvsg->{$ann->{Allele}};
       $ga_annotation->{HGVSc}    = $ann->{Extra}->{HGVSc} if defined $ann->{Extra}->{HGVSc};
       $ga_annotation->{HGVSp}    = $ann->{Extra}->{HGVSp} if defined $ann->{Extra}->{HGVSp};
-      $ga_annotation->{IMPACT}    = $ann->{Extra}->{IMPACT} if defined $ann->{Extra}->{IMPACT};
+      $ga_annotation->{impact}   = $ann->{Extra}->{IMPACT} if defined $ann->{Extra}->{IMPACT};
     
       $ga_annotation->{alternateSequence} =  $ann->{Allele};
 
@@ -117,10 +120,10 @@ sub annotateVariants{
         my @ppos = split(/\-/, $ann->{Protein_position} ) if $ann->{Protein_position} =~/\-/;
         $ga_annotation->{proteinLocation}->{referenceSequence} = $aa[0];
         $ga_annotation->{proteinLocation}->{alternateSequence} = $aa[1];
-        $ga_annotation->{proteinLocation}->{overlapStart}      =  $ppos[0] || $ann->{Protein_position};
-        $ga_annotation->{proteinLocation}->{overlapEnd}        =  $ppos[1] || $ann->{Protein_position};
-        $ga_annotation->{proteinLocation}->{overlapStart} = $ga_annotation->{proteinLocation}->{overlapStart}  - 2;
-        $ga_annotation->{proteinLocation}->{overlapEnd}   = $ga_annotation->{proteinLocation}->{overlapEnd}  -1;
+        $ga_annotation->{proteinLocation}->{overlapStart}      = $ppos[0] || $ann->{Protein_position};
+        $ga_annotation->{proteinLocation}->{overlapEnd}        = $ppos[1] || $ann->{Protein_position};
+        $ga_annotation->{proteinLocation}->{overlapStart}      = $ga_annotation->{proteinLocation}->{overlapStart}  - 2;
+        $ga_annotation->{proteinLocation}->{overlapEnd}        = $ga_annotation->{proteinLocation}->{overlapEnd}  -1;
       }
 
       if( defined $ann->{Codons}){
@@ -135,13 +138,13 @@ sub annotateVariants{
       }
 
       if(defined $ann->{cDNA_position} && $ann->{cDNA_position}=~/\d+/){
-        print "Got cDNA pos :  $ann->{cDNA_position}\n";
-	my @cdnapos = split/\-/,$ann->{cDNA_position} if $ann->{cDNA_position} =~/\-/;
+
+        my @cdnapos = split/\-/,$ann->{cDNA_position} if $ann->{cDNA_position} =~/\-/;
 
 	$ga_annotation->{cDNALocation}->{overlapStart}      =  $cdnapos[0] || $ann->{cDNA_position};
 	$ga_annotation->{cDNALocation}->{overlapEnd}        =  $cdnapos[1] || $ann->{cDNA_position};
         $ga_annotation->{cDNALocation}->{overlapStart}      =  $ga_annotation->{cDNALocation}->{overlapStart} - 2;
-        $ga_annotation->{cDNALocation}->{overlapEnd}        =    $ga_annotation->{cDNALocation}->{overlapEnd} -1;
+        $ga_annotation->{cDNALocation}->{overlapEnd}        =  $ga_annotation->{cDNALocation}->{overlapEnd} -1;
 
       }
 
@@ -149,7 +152,7 @@ sub annotateVariants{
         my $sift_analysis;
         $sift_analysis->{analysisResult} = (split/\(|\)/, $ann->{Extra}->{SIFT})[0];
         $sift_analysis->{analysisScore}  = (split/\(|\)/, $ann->{Extra}->{SIFT})[1];
-        $sift_analysis->{analysis}       = { id          => 'placeholder',
+        $sift_analysis->{analysis}       = { id          => 'ph_sift_date',
                                              description => 'SIFT',
                                              software    => 'SIFT.5.2.2',
                                              info        => { 'protein database' => 'UniRef90 2014_11'}
@@ -161,7 +164,7 @@ sub annotateVariants{
         my $polyphen_analysis;
         $polyphen_analysis->{analysisResult} = (split/\(|\)/, $ann->{Extra}->{PolyPhen})[0];
         $polyphen_analysis->{analysisScore}  = (split/\(|\)/, $ann->{Extra}->{PolyPhen})[1];
-        $polyphen_analysis->{analysis}       = { id          => 'placeholder',
+        $polyphen_analysis->{analysis}       = { id          => 'ph_polyphen_date',
                                                  description => 'Polyphen',
                                                  software    => 'Polyphen.2.2.2_r405',
                                                  info        => { 'protein database' => 'UniRef100 Release 2011_12'}
@@ -169,22 +172,21 @@ sub annotateVariants{
 
         push @{$ga_annotation->{analysisResults}} , $polyphen_analysis;
       }
-
-      
+  
      push @ga_annotation, $ga_annotation;
 
-      }
+    }
     @{$var_annotation->{featureAnnotation}} = @ga_annotation;
 
-  push @{$var_annotation->{coLocatedVariants}}, $existing_var if defined $existing_var;
-  #print "\nreturning annotation : "; print Dumper   $gavar->{annotation}; 
-   push  @gavar_an,  $var_annotation;   
+    push @{$var_annotation->{coLocatedVariants}}, $existing_var if defined $existing_var;
+
+    push  @gavar_an,  $var_annotation;   
   }
 
-local $Data::Dumper::Terse = 1;
-local $Data::Dumper::Indent = 1;
- $self->context->log->debug(Dumper {"variantannotations" => \@gavar_an});
-  print "\n\nEnding at ". localtime() ."\n";
+#local $Data::Dumper::Terse = 1;
+#local $Data::Dumper::Indent = 1;
+# $self->context->log->debug(Dumper {"variantAnnotations" => \@gavar_an});
+  print "\nEnding at ". localtime() ."\n";
   return ({ "variants"   => \@gavar_an});
 
 }
@@ -234,7 +236,7 @@ sub create_config {
 
   my %vep_params = %{ $c->config->{'Controller::VEP'} };
   read_cache_info(\%vep_params);
-#print "In config: " ; print Dumper %vep_params;
+
   $vep_params{hgvs}   = 1;
   $vep_params{format} = 'vcf';
   undef $vep_params{rest} ;
@@ -262,7 +264,6 @@ sub _new_slice_seq {
 
 sub _find_fasta_cache {
   my $self = shift;
-# print "In _find_fasta_cache with file : " . $self->fasta . "\n"; 
   my $fasta_db = Bio::DB::Fasta->new($self->fasta);
   return $fasta_db;
 }

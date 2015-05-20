@@ -48,7 +48,7 @@ sub annotateVariants_POST{
 
   my $post_data = $c->req->data;
 
-  $c->log->debug(Dumper $post_data);
+#  $c->log->debug(Dumper $post_data);
 
   $c->go( 'ReturnError', 'custom', [ ' Cannot find "variants" key in your request' ] )
     unless exists $post_data->{variants} ;
