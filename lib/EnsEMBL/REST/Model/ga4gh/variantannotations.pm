@@ -39,6 +39,7 @@ has 'context' => (is => 'ro');
 
 ## handle genes as well as transcripts
 
+our $species = 'homo_sapiens';
  
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
@@ -49,8 +50,8 @@ sub searchVariantAnnotations {
 
   my ($self, $data ) = @_;
 
-  ## set species
-  $data->{species} = "homo_sapiens";
+  ## temp set id
+  $data->{current_set} = $self->getSet();
 
   ## format look up lists if any specified
   $data->{required_features} = $self->extractRequired( $data->{features}, 'features') if $data->{features}->[0];
@@ -82,8 +83,8 @@ sub searchVariantAnnotations_by_features {
 
   my $c = $self->context();
   
-  my $tra = $c->model('Registry')->get_adaptor($data->{species}, 'Core',      'Transcript');
-  my $tva = $c->model('Registry')->get_adaptor($data->{species}, 'variation', 'TranscriptVariation');
+  my $tra = $c->model('Registry')->get_adaptor($species, 'Core',      'Transcript');
+  my $tva = $c->model('Registry')->get_adaptor($species, 'variation', 'TranscriptVariation');
 
 
   ## hacky paging
@@ -118,12 +119,12 @@ sub searchVariantAnnotations_by_features {
       my $constraint = " tv.consequence_types IN (";
       foreach my $cons(@cons_terms){ $constraint .= "\"$cons\",";}
       $constraint =~ s/\,$/\)/;
-
+      $constraint .= " and somatic = 1 ";
 #      print "Limiting effects for feature to : $constraint\n";
       $tvs = $tva->fetch_all_by_Transcripts_with_constraint([$transcript], $constraint );	
     }
     else{
-      $tvs = $tva->fetch_all_by_Transcripts([$transcript]);
+      $tvs = $tva->fetch_all_somatic_by_Transcripts([$transcript]);
     }
 
 
@@ -154,7 +155,7 @@ sub searchVariantAnnotations_by_features {
 
       $running_total++;
       $var_ann->{variantId} = $tv->variation_feature->variation_name();
-      $var_ann->{annotationSetId} = 'Ensembl_79';
+      $var_ann->{annotationSetId} = $data->{current_set};
       $var_ann->{created} = 'FIXME_release_date';
       push @annotations, $var_ann;
     }
@@ -177,7 +178,7 @@ sub searchVariantAnnotations_by_region {
 
   my $c = $self->context(); 
 
-  my $sla = $c->model('Registry')->get_adaptor($data->{species}, 'Core',      'Slice');
+  my $sla = $c->model('Registry')->get_adaptor($species, 'Core',      'Slice');
 
   my $start = $data->{start};
   $start = $data->{pageToken} if defined $data->{pageToken};  
@@ -207,7 +208,7 @@ sub extractVFbySlice{
 
   my @response;
 
-  my $vfa = $self->context->model('Registry')->get_adaptor($data->{species}, 'Variation', 'VariationFeature');
+  my $vfa = $self->context->model('Registry')->get_adaptor($species, 'Variation', 'VariationFeature');
   $vfa->db->include_failed_variations(0); ## don't extract multi-mapping variants
 
   my $vfs;
@@ -259,7 +260,7 @@ sub fetchByVF{
 
   my $var_ann;
   $var_ann->{variantId} = $vf->variation_name();
-  $var_ann->{annotationSetId} = 'Ensembl_79';
+  $var_ann->{annotationSetId} = $data->{current_set};
   $var_ann->{created} = 'FIXME_release_date';
 
   my $tvs =  $vf->get_all_TranscriptVariations();
@@ -399,5 +400,19 @@ sub extractRequired{
   return $req_hash;
 }
 
+## create temp feature set name from curent db version
+## replace with GA4GH id when format available
+## needs to go in a utils
+sub getSet{
 
+  my $self = shift;
+
+  my $var_ad   = $self->context->model('Registry')->get_DBAdaptor($species, 'variation');
+  my $var_meta = $var_ad->get_MetaContainer();
+  my $version  = $var_meta->schema_version();
+
+  my $set = "Ensembl_" . $version; 
+
+  return $set;
+}
 1;

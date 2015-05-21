@@ -50,6 +50,9 @@ sub build_per_context_instance {
 sub searchFeatures {
 
   my ($self, $data ) = @_; 
+
+  $data->{current_set} = $self->getSet();
+
 print localtime () . " Starting\n "; 
   ## check feature type (ontology terms) is supported
   ## initially default to transcripts only
@@ -181,8 +184,11 @@ sub getFeature{
 
   my $self = shift;
   my $id   = shift;
+  
+  my $data;
+  $data->{current_set} = $self->getSet();
 
-  return $self->getTranscript($id);
+  return $self->getTranscript($id, $data);
 }
 
 ## look up transcript by id
@@ -192,14 +198,15 @@ sub getTranscript{
 
   my $self = shift;
   my $id   = shift;
+  my $data = shift;
 
   my $tra = $self->context->model('Registry')->get_adaptor($species, 'Core', 'Transcript');
-  my $tr = $tra->fetch_by_stable_id( $id );
+  my $tr = $tra->fetch_by_stable_id( $id, $data );
 
   $self->context->go( 'ReturnError', 'custom', [ ' Cannot find transcript feature for id ' . $id ] )
     unless defined $tr ;
 
-  return ({ features => [$self->formatTranscript($tr) ]});
+  return ({ features => [$self->formatTranscript($tr, $data) ]});
 
 }
 
@@ -213,7 +220,7 @@ sub formatTranscript{
 
   my $gaFeature;
   $gaFeature->{id}            = $tr->stable_id();
-  $gaFeature->{featureSetId}  = 'placeholder_Ensembl79';
+  $gaFeature->{featureSetId}  = $data->{current_set};
 
   my $segment;
   ## FIX: check graph stuff
@@ -259,6 +266,21 @@ sub fetchSO{
   $ontologyTerm->{name}   = $ont->[0]->name();
 
   return $ontologyTerm;
+}
+
+## create temp feature set name from curent db version
+## replace with GA4GH id when format available
+sub getSet{
+
+  my $self = shift;
+
+  my $var_ad   = $self->context->model('Registry')->get_DBAdaptor($species, 'variation');
+  my $var_meta = $var_ad->get_MetaContainer();
+  my $version  = $var_meta->schema_version();
+
+  my $set = "Ensembl_" . $version; 
+
+  return $set;
 }
 
 1;
