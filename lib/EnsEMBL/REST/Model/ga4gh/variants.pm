@@ -369,7 +369,7 @@ sub getVariant{
     ## retrun 1KG data by default if available 
     my $var_info = $self->getSingleCallSets($vf->[0], $id);
  
-    return ({ "variants"      => [$var_info]}) if defined $var_info;   
+    return ({ "variants"      => [$var_info]}) if exists $var_info->[0]->{name} ;   
   }
   elsif($id =~/\w+\:c\.\w+|\w+\:g\.\w+|\w+\:p\.\w+/ ){
     ## try to look up as HGVS
@@ -420,7 +420,7 @@ sub getSingleCallSets{
   $data = $self->get_set_info($data);
 
   ## create fake token
-  $data->{pageSize} = 0;
+  $data->{pageSize} = 1;
   $data->{pageToken} = $data->{start} . "_0_0";
 
   my ($var_info, $next_ds) = $self->get_next_by_token($data);
