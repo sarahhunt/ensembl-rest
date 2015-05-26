@@ -157,6 +157,13 @@ sub searchVariantAnnotations_by_features {
       $var_ann->{variantId} = $tv->variation_feature->variation_name();
       $var_ann->{annotationSetId} = $data->{current_set};
       $var_ann->{created} = 'FIXME_release_date';
+
+
+      if( defined $tv->variation_feature->minor_allele() ) {    
+        $var_ann->{info}  = {  "1KG_minor_allele"           =>  $tv->variation_feature->minor_allele(),
+                               "1KG_minor_allele_frequency" =>  $tv->variation_feature->minor_allele_frequency()
+                            };
+      }
       push @annotations, $var_ann;
     }
   }
@@ -263,6 +270,11 @@ sub fetchByVF{
   $var_ann->{annotationSetId} = $data->{current_set};
   $var_ann->{created} = 'FIXME_release_date';
 
+  if( defined $vf->minor_allele() ) {
+    $var_ann->{info}  = {  "1KG_minor_allele"           =>  $vf->minor_allele(),
+                           "1KG_minor_allele_frequency" =>  $vf->minor_allele_frequency()
+                        };
+  }
   my $tvs =  $vf->get_all_TranscriptVariations();
   return undef unless scalar(@{$tvs} > 0);
 
