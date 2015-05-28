@@ -158,6 +158,9 @@ sub searchVariantAnnotations_by_features {
       $var_ann->{annotationSetId} = $data->{current_set};
       $var_ann->{created} = 'FIXME_release_date';
 
+      ## add co-located
+      my $coLocated = $self->getColocated( $tv->variation_feature );
+      $var_ann->{coLocatedVariants} = $coLocated if exists $coLocated->[0];
 
       if( defined $tv->variation_feature->minor_allele() ) {    
         $var_ann->{info}  = {  "1KG_minor_allele"           =>  $tv->variation_feature->minor_allele(),
@@ -288,10 +291,12 @@ sub fetchByVF{
 
       my $ga_annotation  = $self->formatTVA( $tva, $tv ) ;
       push @{$var_ann->{transcriptEffects}}, $ga_annotation;
-   }
-
-  ## add co-located
+    }
   }
+  ## add co-located
+  my $coLocated = $self->getColocated( $vf );
+  $var_ann->{coLocatedVariants} = $coLocated if exists $coLocated->[0];
+
   return $var_ann if exists $var_ann->{transcriptEffects}->[0];
 }
 
@@ -427,4 +432,31 @@ sub getSet{
 
   return $set;
 }
+
+## get variants at same location
+## add method to VFad for speed
+
+sub getColocated{
+
+  my $self   = shift;
+  my $vf     = shift;
+
+  my $vfa = $self->context->model('Registry')->get_adaptor($species, 'Variation', 'VariationFeature');
+
+  my @colocatedNames;
+  my $featureSlice = $vf->feature_Slice;
+
+  my @colocated = (@{$vfa->fetch_all_by_Slice($featureSlice)}, @{$vfa->fetch_all_somatic_by_Slice($featureSlice)});
+
+  return undef unless scalar(@colocated) >1;
+
+  foreach my $colocated (@colocated){
+    my $name = $colocated->variation_name();
+    push @colocatedNames, $name unless $name eq  $vf->variation_name();
+  }
+
+  return \@colocatedNames;
+
+}
+
 1;
