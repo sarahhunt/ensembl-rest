@@ -99,7 +99,7 @@ sub annotateVariants{
 
       $ga_annotation->{id}       = "ph_" .$gavar->{id} . "_" . $ann->{Feature};
 
-      $ga_annotation->{annotationSetId}  = 'Ensembl_79_GRCh37'; ## derive from version
+      $ga_annotation->{annotationSetId}  = 'Ensembl_80_GRCh38'; ## derive from version
       $ga_annotation->{feature}  = $ann->{Feature};
 
       push @{$ga_annotation->{effects}}, $ann->{Consequence};

@@ -28,6 +28,10 @@ sub build_per_context_instance {
   return $self->new({ context => $c, %$self, @args });
 }
 
+## TO DO
+##  handle dataset
+##  previous releases as annotation sets
+
 ## take version info from database or VEP cache?
 ##  - start with db
 ##  - access to historic versions needed
@@ -66,7 +70,7 @@ sub fetch_annotationSet {
 
   my %meta;
   foreach my $l(@{$stuff}){
-    $meta{$l->[0]} = $l->[1];
+    $meta{$l->[0]} = $l->[1] if defined $l->[1];
   }
 
   $annotationSet->{id} = 'Ensembl_' . $meta{schema_version};

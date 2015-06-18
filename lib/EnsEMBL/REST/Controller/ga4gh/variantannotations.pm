@@ -30,7 +30,7 @@ EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 
 POST requests : /ga4gh/variantannotations/search -d
 
-{ "annotationSetIds": [1],
+{ "annotationSetId": "Ensembl",
  "variantName": '' ,
  "referenceName": 7,
  "start":  140419275,
@@ -72,8 +72,8 @@ sub searchVariantAnnotations_POST {
        $post_data->{start} >= $post_data->{end};
 
 
-  $c->go( 'ReturnError', 'custom', [ ' Cannot find "annotationSetIds" key in your request'])
-    unless exists $post_data->{annotationSetIds}->[0];
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "annotationSetId" key in your request'])
+    unless exists $post_data->{annotationSetId};
 
 
   ## set a default page size if not supplied or not a number

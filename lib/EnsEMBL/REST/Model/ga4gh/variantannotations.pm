@@ -53,6 +53,9 @@ sub searchVariantAnnotations {
   ## temp set id
   $data->{current_set} = $self->getSet();
 
+  $self->context->go('ReturnError', 'custom', [" No annotations available for this set: " . $data->{annotationSetId} ])
+    if defined $data->{annotationSetId}  && $data->{annotationSetId} ne $data->{current_set} && $data->{annotationSetId} ne 'Ensembl'; 
+
   ## format look up lists if any specified
   $data->{required_features} = $self->extractRequired( $data->{features}, 'features') if $data->{features}->[0];
   $data->{required_effects}  = $self->extractRequired( $data->{effects}, 'SO' )       if $data->{effects}->[0];
@@ -148,7 +151,7 @@ sub searchVariantAnnotations_by_features {
       my $tvas = $tv->get_all_alternate_TranscriptVariationAlleles();
       foreach my $tva(@{$tvas}) {
         my $ga_annotation  = $self->formatTVA( $tva, $tv ) ;
-        push @{$var_ann->{transcriptEffects}}, $ga_annotation;
+        push @{$var_ann->{transcriptEffects}}, $ga_annotation if defined $ga_annotation->{impact};
       }
       ## don't count or store until TV available
       next unless exists $var_ann->{transcriptEffects};
@@ -228,7 +231,7 @@ sub extractVFbySlice{
     my $constraint; 
     foreach my $cons(@cons_terms){ 
       $constraint .= "vf.consequence_types like \"%$cons\%\" and ";}
-    $constraint =~ s/and $//;
+      $constraint =~ s/and $//;
 #    print "limiting over region with $constraint\n";
     $vfs = $vfa->fetch_all_by_Slice_constraint($slice, $constraint);
   }
@@ -273,11 +276,7 @@ sub fetchByVF{
   $var_ann->{annotationSetId} = $data->{current_set};
   $var_ann->{created} = 'FIXME_release_date';
 
-  if( defined $vf->minor_allele() ) {
-    $var_ann->{info}  = {  "1KG_minor_allele"           =>  $vf->minor_allele(),
-                           "1KG_minor_allele_frequency" =>  $vf->minor_allele_frequency()
-                        };
-  }
+
   my $tvs =  $vf->get_all_TranscriptVariations();
   return undef unless scalar(@{$tvs} > 0);
 
@@ -293,6 +292,14 @@ sub fetchByVF{
       push @{$var_ann->{transcriptEffects}}, $ga_annotation;
     }
   }
+
+  ## add 1KG global MAF as illustrative info
+  if( defined $vf->minor_allele() ) {
+    $var_ann->{info}  = {  "1KG_minor_allele"           =>  $vf->minor_allele(),
+                           "1KG_minor_allele_frequency" =>  $vf->minor_allele_frequency()
+                        };
+  }
+
   ## add co-located
   my $coLocated = $self->getColocated( $vf );
   $var_ann->{coLocatedVariants} = $coLocated if exists $coLocated->[0];
@@ -386,7 +393,7 @@ sub protein_impact{
       
   my $polyphen_analysis;
   $polyphen_analysis->{analysisResult} = $tva->polyphen_prediction() || undef;
-  $polyphen_analysis->{analysisScore}  = $tva->polyphen_prediction() || undef;
+  $polyphen_analysis->{analysisScore}  = $tva->polyphen_score() || undef;
 
   if (defined $polyphen_analysis->{analysisResult}){
     $polyphen_analysis->{analysis}     = { id          => 'placeholder',
@@ -456,7 +463,7 @@ sub getColocated{
   }
 
   return \@colocatedNames;
-
 }
+
 
 1;
