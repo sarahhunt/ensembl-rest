@@ -412,16 +412,16 @@ sub getSingleCallSets{
   $data->{referenceName} = $varfeat->seq_region_name();
   $data->{start}         = $varfeat->seq_region_start() -1;
   $data->{end}           = $varfeat->seq_region_end();
-  $data->{datasetIds}    = [1]; ## return 1KG by default
+  $data->{datasetIds}    = [3]; ## return 1KG by default
   $data->{variantName}   = $id; ## check for supplied name not current database mane
 
 
   ## load callSet to variantSet link 
   $data = $self->get_set_info($data);
 
-  ## create fake token
+  ## create fake token -what should really be returned for get??
   $data->{pageSize} = 1;
-  $data->{pageToken} = $data->{start} . "_0_0";
+  $data->{pageToken} = $data->{start} . "_68_3";
 
   my ($var_info, $next_ds) = $self->get_next_by_token($data);
 
