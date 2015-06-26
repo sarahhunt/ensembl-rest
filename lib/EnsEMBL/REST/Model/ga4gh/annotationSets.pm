@@ -113,8 +113,8 @@ sub getAnnotationSet{
   my $current = "Ensembl_" . $version; 
 
   ## exit if not current
-  $self->context()->go( 'ReturnError', 'custom', [ " No data available" ] )
-    unless $id =~/$current/i;
+  $self->context()->go( 'ReturnError', 'custom', [ " No data available for set $id" ] )
+    unless $id =~/$current/i || $id eq 'Ensembl';
 
   return $self->fetch_annotationSet();
 
