@@ -199,7 +199,7 @@ sub searchVariantAnnotations_by_region {
   my $location = "$data->{referenceName}\:$start\-$data->{end}";
   my $slice = $sla->fetch_by_toplevel_location($location);
 
-  $c->go('ReturnError', 'custom', ["sequence $location available for this assembly"])
+  $c->go('ReturnError', 'custom', ["sequence  location: $location not available in this assembly"])
    if !$slice;
 
   my ($annotations, $nextPageToken) =  $self->extractVFbySlice($data, $slice);
