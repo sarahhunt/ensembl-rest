@@ -241,6 +241,7 @@ sub extractVFbySlice{
 
   my $next_pos; ## save this for paging
   foreach my $vf(@{$vfs}){
+     next unless $vf->{variation_name} =~/rs|COS/; ## Exclude non dbSNP/ COSMIC for now
 #    warn "seeking annot for " . $vf->variation_name() . " count is $count\n";
     ## use next variant location as page token
     if ($count == $data->{pageSize}){
@@ -379,9 +380,9 @@ sub protein_impact{
   my @analysisResults;
 
   my $sift_analysis;
-  $sift_analysis->{analysisResult} = $tva->sift_prediction() || undef;
-  $sift_analysis->{analysisScore}  = $tva->sift_score()      || undef;
-
+  $sift_analysis->{analysisResult} = $tva->sift_prediction();
+  $sift_analysis->{analysisScore}  = $tva->sift_score();
+ 
   if (defined $sift_analysis->{analysisResult}){
     ## move to anotationset?  
     $sift_analysis->{analysis}     = { id          => 'placeholder',
@@ -392,8 +393,8 @@ sub protein_impact{
   }    
       
   my $polyphen_analysis;
-  $polyphen_analysis->{analysisResult} = $tva->polyphen_prediction() || undef;
-  $polyphen_analysis->{analysisScore}  = $tva->polyphen_score() || undef;
+  $polyphen_analysis->{analysisResult} = $tva->polyphen_prediction();
+  $polyphen_analysis->{analysisScore}  = $tva->polyphen_score();
 
   if (defined $polyphen_analysis->{analysisResult}){
     $polyphen_analysis->{analysis}     = { id          => 'placeholder',
