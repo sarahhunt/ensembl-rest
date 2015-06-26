@@ -244,8 +244,11 @@ sub formatTranscript{
                                biotype => $tr->biotype(),
                                gene    => $tr->get_Gene()->display_id(),
                                created => $tr->created_date(),           
-                               updated => $tr->modified_date() 	
+                               updated => $tr->modified_date(),
+                               source  => $tr->source()
                              };
+
+  $gaFeature->{attributes}->{external_name} = $tr->external_name() if defined $tr->external_name(); 
 
   return $gaFeature;
 
