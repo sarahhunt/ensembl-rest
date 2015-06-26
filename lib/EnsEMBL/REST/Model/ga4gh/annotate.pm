@@ -80,6 +80,7 @@ sub annotateVariants{
     no warnings 'redefine';
     local *Bio::EnsEMBL::Slice::seq = $self->_new_slice_seq();
 
+    my $varfeat =  $vf->[0];
     my $consequences = get_all_consequences( $config, $vf);
 
     my $var_annotation;
@@ -107,8 +108,14 @@ sub annotateVariants{
       $ga_annotation->{impact}   = $ann->{IMPACT} if defined $ann->{IMPACT} ;
 
       $ga_annotation->{feature}  = $ann->{Feature};
-      my $hgvsg = $vf->[0]->get_all_hgvs_notations('', 'g') ;
-      $ga_annotation->{HGVSg}    = $hgvsg->{$ann->{Allele}};
+
+      eval{ 
+        ## current problem getting HGVSg for intergenic/ intronic
+        my $hgvsg = $varfeat->get_all_hgvs_notations('', 'g') ;
+        $ga_annotation->{HGVSg}    = $hgvsg->{$ann->{Allele}};
+      };
+      warn "Problem getting HGVSg : $@\n" if defined $@; 
+
       $ga_annotation->{HGVSc}    = $ann->{Extra}->{HGVSc} if defined $ann->{Extra}->{HGVSc};
       $ga_annotation->{HGVSp}    = $ann->{Extra}->{HGVSp} if defined $ann->{Extra}->{HGVSp};
       $ga_annotation->{impact}   = $ann->{Extra}->{IMPACT} if defined $ann->{Extra}->{IMPACT};
@@ -187,7 +194,7 @@ sub annotateVariants{
 #local $Data::Dumper::Indent = 1;
 # $self->context->log->debug(Dumper {"variantAnnotations" => \@gavar_an});
   print "\nEnding at ". localtime() ."\n";
-  return ({ "variants"   => \@gavar_an});
+  return ({ "variantAnnotations"   => \@gavar_an});
 
 }
 
