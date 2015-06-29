@@ -57,13 +57,13 @@ sub searchVariantAnnotations {
     if defined $data->{annotationSetId}  && $data->{annotationSetId} ne $data->{current_set} && $data->{annotationSetId} ne 'Ensembl'; 
 
   ## format look up lists if any specified
-  $data->{required_features} = $self->extractRequired( $data->{features}, 'features') if $data->{features}->[0];
-  $data->{required_effects}  = $self->extractRequired( $data->{effects}, 'SO' )       if $data->{effects}->[0];
+  $data->{required_features} = $self->extractRequired( $data->{feature_ids}, 'features') if $data->{feature_ids}->[0];
+  $data->{required_effects}  = $self->extractRequired( $data->{effects}, 'SO' )          if $data->{effects}->[0];
   #print "Input: "; print Dumper $data;
 
   ## loop over features if supplied
   return $self->searchVariantAnnotations_by_features( $data)
-    if exists $data->{features}->[0];
+    if exists $data->{feature_ids}->[0];
 
   ## search by region otherwise
   return $self->searchVariantAnnotations_by_region( $data)
@@ -102,17 +102,17 @@ sub searchVariantAnnotations_by_features {
 
   ## extract one transcripts worth at once for paging
   ## should records be merged where transcripts overlap??
-  foreach my $req_feat ( @{$data->{features}} ){
-#    print "Starting to look for feature $req_feat->{id} ok_trans is $ok_trans\n";
-    $ok_trans = 1 if defined $current_trans && $req_feat->{id} eq $current_trans;
+  foreach my $req_feat ( @{$data->{feature_ids}} ){
+#    print "Starting to look for feature $req_feat ok_trans is $ok_trans\n";
+    $ok_trans = 1 if defined $current_trans && $req_feat eq $current_trans;
     next unless $ok_trans == 1;
 
     ## may have no annotations if a transcript & consequence specified
-    $self->context->go('ReturnError', 'custom', [" No annotations available for this feature type: " . $req_feat->{featureType}->{name} ])
-      unless $req_feat->{featureType}->{name} eq "transcript";
+#    $self->context->go('ReturnError', 'custom', [" No annotations available for this feature type: " . $req_feat->{featureType}->{name} ])
+#      unless $req_feat->{featureType}->{name} eq "transcript";
 
-    my $transcript = $tra->fetch_by_stable_id( $req_feat->{id} );  
-    $c->go('ReturnError', 'custom', [" feature $req_feat->{id} not found"])
+    my $transcript = $tra->fetch_by_stable_id( $req_feat );  
+    $c->go('ReturnError', 'custom', [" feature $req_feat not found"])
       if !$transcript;
 
     my $tvs;
@@ -141,7 +141,7 @@ sub searchVariantAnnotations_by_features {
       next if defined $next_pos && $pos < $next_pos;
 
       if($running_total == $data->{pageSize}){
-        $nextPageToken = $req_feat->{id} . "_" . $pos;
+        $nextPageToken = $req_feat . "_" . $pos;
         last;
       }
 
@@ -284,7 +284,7 @@ sub fetchByVF{
   foreach my $tv (@{$tvs}){   
 
     ## check if a feature list was specified
-    next if scalar @{$data->{features}}>0 && !exists $data->{required_features}->{ $tv->transcript()->stable_id()} ; 
+    next if scalar @{$data->{feature_ids}}>0 && !exists $data->{required_features}->{ $tv->transcript()->stable_id()} ; 
 
     my $tvas = $tv->get_all_alternate_TranscriptVariationAlleles();
     foreach my $tva(@{$tvas}) {
@@ -419,7 +419,7 @@ sub extractRequired{
   my $req_hash;
 
   foreach my $required ( @{$req_list} ){
-    $req_hash->{$required->{id}}   = 1 if $type eq 'feature';
+    $req_hash->{$required}         = 1 if $type eq 'feature';
     $req_hash->{$required->{name}} = 1 if $type eq 'SO';
   }
   return $req_hash;
