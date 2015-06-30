@@ -37,7 +37,7 @@ sub fetch_references {
   
   my $post_data = $c->req->data;
 
-  $c->log->debug(Dumper $post_data);
+#  $c->log->debug(Dumper $post_data);
 
   $c->go( 'ReturnError', 'custom', [ ' Error - search by md5sum not currently supported'])
     if exists $post_data->{md5checksums} ;
@@ -70,6 +70,9 @@ sub getReferences{
   my $nextToken;
   my $start = 0;
 
+  ## fetch version info needed for ftp path once
+  my ($ens_version, $assembly ) = $self->getVersion(); 
+
   my $c = $self->context();
 
   my $slice_ad = $c->model('Registry')->get_adaptor($species, 'Core', 'slice');
@@ -94,7 +97,7 @@ sub getReferences{
       last;
     }
    
-    my $ref = $self->format_slice($slice);
+    my $ref = $self->formatSlice($slice, $ens_version, $assembly);
     push @references,  $ref;
   }
 
@@ -119,33 +122,59 @@ sub getReference{
   $self->context()->go( 'ReturnError', 'custom', [ " No data available for this reference : $get_id" ] )
     unless defined $slice;
 
-  my $reference = $self->format_slice($slice);
+  my ($ens_version, $assembly ) = $self->getVersion();
+
+  my $reference = $self->formatSlice($slice, $ens_version, $assembly);
   return { references => [$reference]};
 
 }
 
-sub format_slice{
+sub formatSlice{
 
-  my $self  = shift;
-  my $slice = shift;
-
+  my $self     = shift;
+  my $slice    = shift;
+  my $ens_ver  = shift;
+  my $assembly = shift;
   my %ref;
 
   $ref{start}  = 0; ##FIX
   $ref{length} = $slice->length();
   $ref{id}     = $slice->display_id();
   $ref{name}   = $slice->seq_region_name();
- 
-  my @alternative_names = @{$slice->get_all_synonyms('RefSeq_genomic')} ;
-  $ref{accession}  =  $alternative_names[0]->name() if defined $alternative_names[0];
 
+  my @alternative_names = @{$slice->get_all_synonyms('RefSeq_genomic')} ;
+  $ref{sourceAccessions}  = [ $alternative_names[0]->name()] if defined $alternative_names[0];
   warn "Error- 2 accessions\n" if defined $alternative_names[1];
+
+  $ref{ncbiTaxonId} = 9609; 
+  $ref{isDerived}   = 'true'; ##ambiguity codes to Ns
+  $ref{isPrimary}   = 'true';
+
+  ## Fix these
+  $ref{sequenceId}  = $ref{id} ;
+  $ref{md5checksum} ='';
+  $ref{url} =  'ftp://ftp.ensembl.org/pub/release-'. $ens_ver .'/fasta/homo_sapiens/dna/Homo_sapiens.'. $assembly.'.dna.chromosome.' . $ref{name} . '.fa.gz' 
+   if length($ref{name})<3;
+
+  $ref{sourceDivergence} = '';
 
   return \%ref;
 
 }
 
+sub getVersion{
 
+  my $self  = shift;
 
+  my $core_ad     = $self->context->model('Registry')->get_DBAdaptor($species, 'core');
+  my $core_meta   = $core_ad->get_MetaContainer();
+  my $ens_version = $core_meta->schema_version();
+
+  my ($highest_cs) = @{$core_ad->get_CoordSystemAdaptor->fetch_all()};
+  my $assembly = $highest_cs->version();
+
+  return ($ens_version, $assembly );
+
+}
 
 1;
