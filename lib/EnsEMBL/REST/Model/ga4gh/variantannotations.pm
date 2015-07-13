@@ -324,6 +324,9 @@ sub formatTVA{
   $ga_annotation->{HGVSc} = $tva->hgvs_transcript() || undef; 
   $ga_annotation->{HGVSp} = $tva->hgvs_protein()    || undef;
 
+  $ga_annotation->{feature_id} = $tv->transcript()->stable_id();
+  $ga_annotation->{id} = "id";
+
   ## get consequences & impact
   my $ocs = $tva->get_all_OverlapConsequences();
 
