@@ -52,7 +52,10 @@ my $expected_data1 = {  nextPageToken => "16050158_65_2",
              genotype => [    
                0,          
                1          
-             ]             
+             ], 
+             genotypeLikelihood => [], 
+             info => {},   
+             phaseset => '' 
            }              
          ],              
          end => 16050159,      
@@ -101,16 +104,6 @@ my $expected_data2 = {
           genotype => [             
             1,                    
             1                     
-          ]                         
-        }                           
-      ],                            
-      end => 16132101,              
-      id => 'rs150753069',          
-      name => 'rs150753069',        
-      referenceBases => 'G',        
-      referenceName => '22',        
-      start => '16132100',          
-      variantSetId => '22'          
           ],
           genotypeLikelihood => ['-0.48', '-0.48', '-0.48'],
           info => {             
@@ -118,8 +111,8 @@ my $expected_data2 = {
               '1.950' 
             ]         
           },
-          phaseset => ''                            
-        }                           
+          phaseset => ''                                                     
+        }                                                       
       ],                            
       end => 16132101,              
       id => 'rs150753069',
@@ -214,7 +207,10 @@ my $expected_data4 = {  nextPageToken => "16050251_65_2",
              genotype => [
                0,
                1
-             ]
+             ],
+             genotypeLikelihood => [], 
+             info => {},
+             phaseset => ''
            }
          ],
          end => 16050252,

@@ -238,8 +238,13 @@ sub sort_genotypes {
             push @{$gen_hash->{genotypeLikelihood}}, numeric($gl);
           }
         }
-        else{ 
-          $gen_hash->{info}->{$inf} = [$geno_strings->{$sample}->{$inf}];
+        else{
+          if( $geno_strings->{$sample}->{$inf} =~/\,/){
+            @{$gen_hash->{info}->{$inf}} = split/\,/, $geno_strings->{$sample}->{$inf};
+          }
+          else{ 
+            $gen_hash->{info}->{$inf} = [$geno_strings->{$sample}->{$inf}];
+          }
         }
       }
     }
@@ -288,7 +293,7 @@ sub get_next_by_token{
   my $ds_ob = $data->{coll}->{$current_ds};
   my $file  = $ds_ob->filename_template(); 
   $file =~ s/\#\#\#CHR\#\#\#/$data->{referenceName}/;
-  $file = $self->{dir} .'/'. $file;
+  $file = $self->{geno_dir} .'/'. $file;
 
   my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $file ) || die "Failed to get parser : $!\n";
   $parser->seek($data->{referenceName},$batch_start,$batch_end);
@@ -333,7 +338,7 @@ sub get_next_by_token{
       $variation_hash->{variantSetId}    = $set_required;
       $variation_hash->{calls}           = $genotype_calls->{$set_required};
 
-      $variation_hash->{name}            = $name;
+      $variation_hash->{names}           = [ $name ];
       $variation_hash->{id}              = $name;
       $variation_hash->{referenceBases}  = $parser->get_reference;
       $variation_hash->{alternateBases}  = \@{$parser->get_alternatives};
