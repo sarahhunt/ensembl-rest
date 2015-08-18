@@ -31,29 +31,33 @@ has 'context' => (is => 'ro');
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
   return $self->new({ context => $c, %$self, @args });
+
 }
 
-sub fetch_ga_variantSet {
+=head fetch_variantSets
+
+  POST request entry point
+
+=cut
+
+sub fetch_variantSets {
 
   my ($self, $data ) = @_;
 
-  ## is filtering by dataset required?
-  if(defined $data->{datasetIds}->[0]){
-    foreach my $dataset ( @{$data->{datasetIds}} ){
-      $data->{req_datasets}->{$dataset} = 1; 
-    }
-  } 
-
-
   ## extract required variant sets
-  my $varsets = $self->fetch_sets($data);
+  my ($variantSets, $newPageToken ) = $self->fetch_sets($data);
 
-  return ({"variantSets" => $varsets});
+  my $ret = { variantSets => $variantSets};
+  $ret->{pageToken} = $newPageToken  if defined $newPageToken ;
 
+  return $ret;
 }
 
+=head fetch_sets
 
+Read config, apply filtering and format records
 
+=cut
 
 sub fetch_sets{
 
@@ -76,7 +80,7 @@ sub fetch_sets{
   foreach my $dataSet(@{$vca->fetch_all} ) {
      $dataSet->use_db(0);
     ## limit by data set if required
-    next unless !defined  $data->{req_datasets} || defined $data->{req_datasets}->{ $dataSet->id() }; 
+    next unless !defined $data->{datasetId} || $dataSet->id() eq $data->{datasetId} ; 
 
     ## get info descriptions from one of the VCF files    
     my $meta = $self->get_info($dataSet);
@@ -91,7 +95,12 @@ sub fetch_sets{
 
     ## loop through and save all available variantsets
     foreach my $population (@{$dataSet->get_all_Populations}){
+
       my $varset = $population->dbID();
+
+      ## limit by variant set if required (for GET)
+      next unless !defined  $data->{req_variantset} || $data->{req_variantset} eq $varset;
+
       $variantSets{$varset}{datasetId}   = $dataSet->id();
       my @m = @{$meta};
       my %m  = ( "key"   => "set_name", 
@@ -112,7 +121,7 @@ sub fetch_sets{
     ## paging - skip if already returned
     next if $varset_id < $next_set_id;
    
-    if ( $n == $data->{pageSize}){
+    if (defined $data->{pageSize} &&  $n == $data->{pageSize}){
       ## set next token and stop storing if page size reached
       $newPageToken = $varset_id if defined $data->{pageSize} && $n == $data->{pageSize};
       last;
@@ -128,15 +137,22 @@ sub fetch_sets{
   }
 
   ## check there is something to return
-  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find any variantSets for this dataset"]) if $n ==0;
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find any variantSets for this query"]) if $n ==0;
  
-  push @varsets, {"pageToken" => $newPageToken } if defined $newPageToken ;
-
-  return (\@varsets);
+  my $ret = { variantSets => \@varsets};
+  $ret->{pageToken} = $newPageToken  if defined $newPageToken ;
+ 
+  return (\@varsets, $newPageToken );
   
 }
 
-## get info descriptions from one of the VCF files    
+=head2 get_info
+
+ get info descriptions from one of the VCF files   
+ to report as meta data
+
+=cut
+
 sub get_info{
 
   my $self = shift;
@@ -166,6 +182,31 @@ sub get_info{
   }
  
   return \@meta;
+}
+
+
+
+
+=head2 getVariantSet
+
+  Gets a VariantSet by ID.
+  GET /variantsset/{id}
+
+=cut
+
+sub getVariantSet{
+
+  my ($self, $id ) = @_; 
+
+  my $c = $self->context();
+
+  my $data = {req_variantset => $id};
+
+  ## extract required variant set 
+  my ($variantSets, $newPageToken ) = $self->fetch_sets($data);
+
+  ## would exit earlier if no data
+  return $variantSets->[0];
 }
 
 1;
