@@ -47,7 +47,7 @@ sub fetch_datasets{
   my $count = 0;
   my $next;      
   my $start = 1;
-  $start = 0 if defined $data->{pageToken}; 
+  $start = 0 if defined $data->{pageToken} && $data->{pageToken} ne ''; 
 
 
   foreach my $collection(@{$vca->fetch_all} ) { ##sort!
