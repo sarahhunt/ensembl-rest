@@ -80,7 +80,7 @@ sub fetch_sets{
   foreach my $dataSet(@{$vca->fetch_all} ) {
      $dataSet->use_db(0);
     ## limit by data set if required
-    next unless !defined $data->{datasetId} || $dataSet->id() eq $data->{datasetId} ; 
+    next unless (!defined $data->{datasetId}|| $data->{datasetId} eq "") || $dataSet->id() eq $data->{datasetId} ; 
 
     ## get info descriptions from one of the VCF files    
     my $meta = $self->get_info($dataSet);
