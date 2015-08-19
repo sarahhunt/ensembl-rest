@@ -34,29 +34,41 @@ sub build_per_context_instance {
   return $self->new({ context => $c, %$self, @args });
 }
 
-sub fetch_ga_callSet {
+
+=head2 fetch_callSets
+
+  POST request entry point
+
+  ga4gh/callsets/search -d 
+
+{ "variantSetId": 1,
+ "name": '' ,
+ "pageToken":  null,
+ "pageSize": 10
+}
+
+=cut
+
+sub fetch_callSets {
 
   my ($self, $data ) = @_;
 
-#  print Dumper $data;
+  my ($callsets, $newPageToken ) = $self->fetch_batch($data);
 
-  ## format set ids if filtering by set required
-  if(defined $data->{variantSetIds}->[0]){
+  my $return_data = { callSets  => $callsets} ;
+  $return_data->{pageToken} = $newPageToken if defined $newPageToken ;
 
-    my %req_variantset;
-    foreach my $set ( @{$data->{variantSetIds}} ){
-      $req_variantset{$set} = 1; 
-    }
-    $data->{req_variantsets} = \%req_variantset;
-  } 
-
-  ## extract required sets
-  return $self->fetch_callSets($data);
-
+  return $return_data;
 }
 
+=head2 fetch_batch
 
-sub fetch_callSets{
+Read config, apply filtering and format records
+Handle paging and return nextPageToken if required
+
+=cut
+
+sub fetch_batch{
 
   my $self = shift;
   my $data = shift;
@@ -76,30 +88,32 @@ sub fetch_callSets{
   my $count_ind = 0;## for paging [!!put ids back]
   foreach my $dataSet ( @{$vca->fetch_all} ){
 
-    ## loop over variantSets
-    foreach my $varSetId( sort(keys %{$dataSet->{sets}}) ){
-      ## limit by data set if required
-      next if defined  $data->{req_variantsets} &&  ! defined $data->{req_variantsets}->{$varSetId}; 
-    }
-
     ## loop over callSets
     $dataSet->{sample_populations} = $dataSet->{_raw_populations};
     foreach my $callset_id( sort( keys %{$dataSet->{sample_populations}} ) ){
 
-      next if defined $data->{name} && $callset_id !~ /$data->{name}/; 
-     
+      ## stop if there are enough saved for the required batch size
       last if defined  $newPageToken ;
+
+
+      ## filter by name if required
+      next if defined $data->{name} && $callset_id !~ /$data->{name}/; 
+
+      ## filter by id from GET request (these will be different to names eventually)
+      next if defined $data->{req_callset} && $callset_id !~ /$data->{req_callset}/;
  
-      ## limit by variant set if required
-      next if defined $data->{req_variantsets} && ! defined $data->{req_variantsets}->{ $dataSet->{sample_populations}->{$callset_id}->[0] } ;
- 
+      ## filter by variant set if required
+      next if defined $data->{variantSetId} && $data->{variantSetId} ne ''  && 
+        $data->{variantSetId} ne  $dataSet->{sample_populations}->{$callset_id}->[0] ;
+
+
       ## paging
       $count_ind++;
       ## skip ind already reported
       next if $count_ind <$next_ind_id;
       $newPageToken = $count_ind + 1  if (defined  $data->{pageSize}  &&  $data->{pageSize} =~/\w+/ && $n == $data->{pageSize});
 
-      
+
       ## save info
       my $callset;
       $callset->{sampleId}       = $callset_id;
@@ -107,21 +121,41 @@ sub fetch_callSets{
       $callset->{name}           = $callset_id;
       $callset->{variantSetIds}  = [$dataSet->{sample_populations}->{$callset_id}->[0]]; 
       $callset->{info}           = {"assembly_version" => [ $dataSet->assembly]};
-
+      $callset->{created}        = $dataSet->created();
+      $callset->{updated}        = $dataSet->updated();
       push @callsets, $callset;
-      $n++;
+      $n++; ## keep track of batch size
 
     }
   }
 
- 
-  my $return_data = { "callSets"  => \@callsets};
-  $return_data->{"pageToken"} = $newPageToken if defined $newPageToken ;
-
-  return $return_data; 
-  
+  return (\@callsets, $newPageToken);
 }
 
+
+=head2 getCallSet
+
+  GET entry point - get a CallSet by ID.
+  ga4gh/callset/{id}
+
+=cut
+
+sub get_callSet{
+
+  my ($self, $id ) = @_; 
+
+  my $c = $self->context();
+
+  my $data = {req_callset => $id};
+
+  ## extract required call set 
+  my ($callSets, $newPageToken ) = $self->fetch_batch($data);
+
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find a callSet with id: $id"])
+    unless defined $callSets && defined $callSets->[0];
+
+  return $callSets->[0];
+}
 
 
 1;
