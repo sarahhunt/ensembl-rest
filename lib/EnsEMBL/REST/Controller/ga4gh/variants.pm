@@ -30,7 +30,7 @@ EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 
 POST requests : /ga4gh/variants/search -d
 
-{ "variantSetIds": [1],
+{ "variantSetId": 1,
  "variantName": '' ,
  "callSetIds": [],
  "referenceName": 7,
@@ -74,8 +74,8 @@ sub searchVariants_POST {
     unless $post_data->{end} >= $post_data->{start};
 
 
-  $c->go( 'ReturnError', 'custom', [ ' Cannot find "variantSetIds" key in your request'])
-    unless exists $post_data->{variantSetIds}->[0];
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "variantSetId" key in your request'])
+    unless exists $post_data->{variantSetId};
 
 
   ## set a default page size if not supplied or not a number
