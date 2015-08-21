@@ -23,7 +23,7 @@ extends 'Catalyst::Model';
 
 use Bio::EnsEMBL::IO::Parser::VCF4Tabix;
 use Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor;
-
+use Digest::MD5 qw(md5_hex);
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
@@ -37,10 +37,6 @@ sub build_per_context_instance {
 sub fetch_datasets{
   my ($self, $data ) = @_;
 
-  ## read config
-  $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
-  my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
-
   my @datasets;
 
   ## paging
@@ -49,24 +45,31 @@ sub fetch_datasets{
   my $start = 1;
   $start = 0 if defined $data->{pageToken} && $data->{pageToken} ne ''; 
 
+  my $collections = $self->sort_collections;
+  foreach my $id(keys %{$collections}){
 
-  foreach my $collection(@{$vca->fetch_all} ) { ##sort!
-
-    $start = 1 if (defined $data->{pageToken} &&  $data->{pageToken} eq $collection->id());
+    $start = 1 if (defined $data->{pageToken} &&  $data->{pageToken} eq $id);
 
     ## skip if in last batch
     next if $start == 0 ;
 
     ## store start of next batch before exiting this one
     if ($count == $data->{pageSize}){
-      $next = $collection->id();
+      $next = $id;
       last; 
     }
 
     ## store and increment counter
-    my $dataset = { id => $collection->id(), description => $collection->source_name() };
-    push @datasets, $dataset;
-    $count++;
+    my %done;
+    my $data_source = $collections->{$id}->source_name() ;
+    unless (defined $done{$data_source}){
+
+      ## don't use source->dbId as may clash with other entries 
+      my $dataset = { id => $id, description => $data_source };
+      push @datasets, $dataset;
+      $count++;
+      $done{$data_source} = 1;
+    }
   }
 
   $self->context()->go( 'ReturnError', 'custom', [ " No datasets is available"])
@@ -76,6 +79,27 @@ sub fetch_datasets{
 
 
 }
+
+sub sort_collections{
+
+  my ($self) = @_;
+
+  ## read config
+  $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
+  my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
+
+  my %collections;
+  foreach my $collection(@{$vca->fetch_all} ) { 
+
+    my $ga_id = md5_hex($collection->source_name());
+    $collections{$ga_id} = $collection;
+  }
+
+  return \%collections;
+
+}
+
+
 
 sub getDataset{
 
@@ -89,11 +113,13 @@ sub getDataset{
   ## extract requested data
   my $dataset;  
 
-  foreach my $dataSet(@{$vca->fetch_all} ) {
+  foreach my $collection(@{$vca->fetch_all} ) {
 
-     next unless $dataSet->id() eq $id;
+     my $ga_id = md5_hex($collection->source_name());
 
-     $dataset = { id => $id, description => $dataSet->source_name() };
+     next unless $ga_id eq $id;
+
+     $dataset = { id => $ga_id, description => $collection->source_name() };
   }
 
   $self->context()->go( 'ReturnError', 'custom', [ " No dataset is available with this id"])

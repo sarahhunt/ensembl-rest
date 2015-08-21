@@ -34,10 +34,10 @@ Catalyst::Test->import('EnsEMBL::REST');
 my $base = '/ga4gh/datasets/search';
 
 my $post_data1 = '{ "pageSize": 1 }';
-my $post_data2 = '{ "pageSize": 1, "pageToken":"2" }';
+my $post_data2 = '{ "pageSize": 1, "pageToken":"e06d8b736a50aaf1460f7640dce12012" }';
 
-my $expected_data1 = {datasets => [ { id => '1', description => '1000 Genomes phase1' }], nextPageToken => "2"}; 
-my $expected_data2 = {datasets => [ { id => '2', description => 'Illumina platinum genomes'}], nextPageToken => undef};
+my $expected_data2 = {datasets => [ { id => 'e06d8b736a50aaf1460f7640dce12012', description => '1000 Genomes phase1' }], nextPageToken => undef}; 
+my $expected_data1 = {datasets => [ { id => 'c7d2c4a0e0dcb28bdb30559f16c7819d', description => 'Illumina platinum genomes'}], nextPageToken => 'e06d8b736a50aaf1460f7640dce12012'};
 
 
 my $json1 = json_POST( $base , $post_data1, 'dataset - 1 entry' );
@@ -51,8 +51,8 @@ eq_or_diff($json2, $expected_data2, "Checking the result from the ga4gh dataset 
 ### check get
 
 $base =~ s/\/search//;
-my $id = 2;
-my $expected_data3 = { id => '2', description => 'Illumina platinum genomes'};
+my $id = 'e06d8b736a50aaf1460f7640dce12012';
+my $expected_data3 = { id => 'e06d8b736a50aaf1460f7640dce12012', description => '1000 Genomes phase1'};
 
 my $json3 = json_GET("$base/$id", 'get dataset');
 eq_or_diff($json3, $expected_data3, "Checking the get result from the dataset endpoint");

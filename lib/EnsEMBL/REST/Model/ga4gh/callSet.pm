@@ -68,6 +68,8 @@ Handle paging and return nextPageToken if required
 
 =cut
 
+## switched sample list look-up to VCF file rather than config - will be slower
+
 sub fetch_batch{
 
   my $self = shift;
@@ -81,31 +83,40 @@ sub fetch_batch{
   my $n = 1;
   my $newPageToken; ## save id of next individual to start with
 
-
+  $ENV{ENSEMBL_VARIATION_VCF_ROOT_DIR} = $self->{geno_dir};
   $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
   my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
+  
+  my %collections; 
+  foreach my $vcf_collection ( @{$vca->fetch_all} ){
+    $collections{$vcf_collection->id()} = $vcf_collection;
+  }
 
-  my $count_ind = 0;## for paging [!!put ids back]
-  foreach my $dataSet ( @{$vca->fetch_all} ){
+  my $count_ind = 0;## for paging
+  foreach my $vcfc_id (sort sort_num keys %collections){
+    my $vcf_collection = $collections{$vcfc_id};
+
+    $vcf_collection->use_db(0);
+    ## filter by variant set if required
+    next if defined $data->{variantSetId} && $data->{variantSetId} ne ''  &&
+      $data->{variantSetId} ne  $vcf_collection->id() ;
 
     ## loop over callSets
-    $dataSet->{sample_populations} = $dataSet->{_raw_populations};
-    foreach my $callset_id( sort( keys %{$dataSet->{sample_populations}} ) ){
+    my $samples = $vcf_collection->get_all_Samples(); ## returned sorted
 
+    foreach my $sample (@{$samples}){ 
+
+      my $sample_name = $sample->name();
       ## stop if there are enough saved for the required batch size
       last if defined  $newPageToken ;
 
 
       ## filter by name if required
-      next if defined $data->{name} && $callset_id !~ /$data->{name}/; 
+      next if defined $data->{name} && $sample_name !~ /$data->{name}/; 
 
       ## filter by id from GET request (these will be different to names eventually)
-      next if defined $data->{req_callset} && $callset_id !~ /$data->{req_callset}/;
+      next if defined $data->{req_callset} && $sample_name !~ /$data->{req_callset}/;
  
-      ## filter by variant set if required
-      next if defined $data->{variantSetId} && $data->{variantSetId} ne ''  && 
-        $data->{variantSetId} ne  $dataSet->{sample_populations}->{$callset_id}->[0] ;
-
 
       ## paging
       $count_ind++;
@@ -116,13 +127,14 @@ sub fetch_batch{
 
       ## save info
       my $callset;
-      $callset->{sampleId}       = $callset_id;
-      $callset->{id}             = $callset_id;
-      $callset->{name}           = $callset_id;
-      $callset->{variantSetIds}  = [$dataSet->{sample_populations}->{$callset_id}->[0]]; 
-      $callset->{info}           = {"assembly_version" => [ $dataSet->assembly]};
-      $callset->{created}        = $dataSet->created();
-      $callset->{updated}        = $dataSet->updated();
+      $callset->{sampleId}       = $sample_name;
+      $callset->{id}             = $sample_name;
+      $callset->{name}           = $sample_name;
+      $callset->{variantSetIds}  = [$vcf_collection->id()]; 
+      $callset->{info}           = {"assembly_version" => [ $vcf_collection->assembly() ],
+                                    "variantSetName"   => [ $vcf_collection->source_name()] };
+      $callset->{created}        = $vcf_collection->created();
+      $callset->{updated}        = $vcf_collection->updated();
       push @callsets, $callset;
       $n++; ## keep track of batch size
 
@@ -157,5 +169,7 @@ sub get_callSet{
   return $callSets->[0];
 }
 
-
+sub sort_num{
+  $a<=>$b;
+}
 1;

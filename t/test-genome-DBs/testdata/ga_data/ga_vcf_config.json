@@ -38,7 +38,6 @@
                       "21" : "1000GENOMES:phase_1:AMR", 
                       "22" : "1000GENOMES:phase_1:ASM", 
                       "23" : "1000GENOMES:phase_1:EUR"},
-      "sample_prefix": "1000GENOMES:phase_1:",
       "sample_populations": {
         "NA12347": ["23"],
         "NA12348": ["23"],

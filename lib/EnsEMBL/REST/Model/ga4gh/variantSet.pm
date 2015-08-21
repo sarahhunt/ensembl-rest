@@ -23,6 +23,8 @@ extends 'Catalyst::Model';
 use Data::Dumper;
 use Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor;
 use Bio::EnsEMBL::IO::Parser::VCF4Tabix;
+use Digest::MD5 qw(md5_hex);
+
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
@@ -69,71 +71,69 @@ sub fetch_sets{
   $next_set_id    = $data->{pageToken} if ( defined $data->{pageToken} && $data->{pageToken} ne "");
 
 
-
   ## read config
+  $ENV{ENSEMBL_VARIATION_VCF_ROOT_DIR} = $self->{geno_dir};
   $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
   my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
 
-  ## extract requested data
-  my %variantSets;  
-
-  foreach my $dataSet(@{$vca->fetch_all} ) {
-     $dataSet->use_db(0);
-    ## limit by data set if required
-    next unless (!defined $data->{datasetId}|| $data->{datasetId} eq "") || $dataSet->id() eq $data->{datasetId} ; 
-
-    ## get info descriptions from one of the VCF files    
-    my $meta = $self->get_info($dataSet);
-
-    ## add summary of essential info for meta for the data set from the config
-    foreach my $key ("assembly", "source_name", "source_url"){
-      my %meta;
-      $meta{key}   = $key;
-      $meta{value} = $dataSet->$key;
-      push @{$meta}, \%meta;
-    }
-
-    ## loop through and save all available variantsets
-    foreach my $population (@{$dataSet->get_all_Populations}){
-
-      my $varset = $population->dbID();
-
-      ## limit by variant set if required (for GET)
-      next unless !defined  $data->{req_variantset} || $data->{req_variantset} eq $varset;
-
-      $variantSets{$varset}{datasetId}   = $dataSet->id();
-      my @m = @{$meta};
-      my %m  = ( "key"   => "set_name", 
-                 "value" => $population->name()
-               );
-      push @m, \%m;
-      $variantSets{$varset}{metadata}    = \@m;
-    }
+  ## extract ids to sort for paging
+  my %vc_ob;
+  foreach my $vcf_collection( @{$vca->fetch_all} ) {
+    $vc_ob{$vcf_collection->id()} = $vcf_collection;
   }
+
 
   ## create response with correct number of variantSets
   my @varsets;
   my $n = 0;
   my $newPageToken; ## save id of next variantSet to start with
+ 
 
-  foreach my $varset_id (sort (keys %variantSets)){    
+  foreach my $varset_id(sort sort_num(keys %vc_ob )) {
+
+
+    ## limit by variant set if required (for GET)
+    next if defined  $data->{req_variantset} && $data->{req_variantset} ne '' 
+      && $varset_id ne $data->{req_variantset};
 
     ## paging - skip if already returned
     next if $varset_id < $next_set_id;
-   
-    if (defined $data->{pageSize} &&  $n == $data->{pageSize}){
-      ## set next token and stop storing if page size reached
-      $newPageToken = $varset_id if defined $data->{pageSize} && $n == $data->{pageSize};
-      last;
-    }
-    ## store variantSet info to return
-    my $varset;
-    $varset->{id} = $varset_id;
-    $varset->{datasetId} = $variantSets{$varset_id}->{datasetId};
-    $varset->{metadata}  = $variantSets{$varset_id}->{metadata};
-    push @varsets, $varset;
-    $n++;
+print "got ". md5_hex($vc_ob{$varset_id}->source_name()) ." for ". $vc_ob{$varset_id}->source_name() ."\n";
+    ## limit by data set if required
+    next if defined $data->{datasetId} && $data->{datasetId} ne ''
+      &&  md5_hex($vc_ob{$varset_id}->source_name()) ne $data->{datasetId} ; 
 
+    ## set next token and stop storing if page size reached
+    if (defined $data->{pageSize} &&  $n == $data->{pageSize}){
+      $newPageToken = $varset_id if defined $data->{pageSize} && $n == $data->{pageSize};
+ print "finished batch\n";    
+  last;
+    }
+
+
+
+    ## extract required info
+    my $variantSet;
+
+    ## get info descriptions from one of the VCF files    
+    my $meta = $self->get_info($vc_ob{$varset_id});
+
+    ## add summary of essential info for meta for the data set from the config
+    foreach my $key ( "source_name", "source_url"){
+      my %meta;
+      $meta{key}   = $key;
+      $meta{value} = $vc_ob{$varset_id}->$key;
+      push @{$meta}, \%meta;
+    }
+
+    ## store
+    $variantSet->{id}             = $varset_id;
+    $variantSet->{datasetId}      = md5_hex($vc_ob{$varset_id}->source_name());
+    $variantSet->{metadata}       = \@{$meta};
+    $variantSet->{referenceSetId} = $vc_ob{$varset_id}->assembly();
+    push @varsets, $variantSet;
+    $n++;
+   
   }
 
   ## check there is something to return
@@ -155,12 +155,14 @@ sub fetch_sets{
 
 sub get_info{
 
-  my $self = shift;
-  my $dataSet  = shift;
+  my $self      = shift;
+  my $vcf_coll  = shift;
 
-  my $vcf_file  = $dataSet->filename_template();
-  $vcf_file =~ s/\#\#\#CHR\#\#\#/22/;
-  $vcf_file = $self->{dir} .'/'. $vcf_file;
+  ## get a chromosome to read meta data (compliance set covers only few chroms) 
+  my $chr = $vcf_coll->list_chromosomes()->[0];
+
+  my $vcf_file  = $vcf_coll->filename_template();
+  $vcf_file =~ s/\#\#\#CHR\#\#\#/$chr/;
 
   my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $vcf_file ) || die "Failed to get parser : $!\n";
 
@@ -207,6 +209,10 @@ sub getVariantSet{
 
   ## would exit earlier if no data
   return $variantSets->[0];
+}
+
+sub sort_num{
+  $a<=>$b;
 }
 
 1;

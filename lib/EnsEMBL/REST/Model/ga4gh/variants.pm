@@ -31,7 +31,7 @@ with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
 
-our $DEBUG = 0;
+
 
 =head2
 
@@ -109,20 +109,19 @@ sub fetch_by_region{
   my ($var_info, $next_token)  = $self->get_next_by_token($data);
 
 
-  warn "No variants are available for this region\n"   
-     unless defined $var_info && scalar(@{$var_info}) >0 && $DEBUG ==1;
-
-
   return ({ "variants"      => $var_info,
             "nextPageToken" => $next_token
           });
   
 }
 
+=head2 sort_genotypes
 
-## extract genotypes & apply filtering
-## input: array of strings - format : 'NA10000:0|1:44:23'
-## output: array of individual genotype hashes
+  extract genotypes & apply filtering 
+
+  input:  array of strings - format : 'NA10000:0|1:44:23'
+  output: array of individual genotype hashes
+=cut
 sub sort_genotypes {
   my ($self, $parser, $data, $is_remapped) = @_;
 
@@ -213,10 +212,8 @@ sub get_next_by_token{
     last if $got_something ==0;
 
     my $name = $parser->get_IDs->[0];
-#    next unless defined $name ;
 
-
-   if ($n == $data->{pageSize} ){
+    if ($n == $data->{pageSize} ){
       ## batch complete 
       ## save next position for new page token
       $nextToken = $parser->get_raw_start;
@@ -379,23 +376,6 @@ sub getSingleCallSets{
   return $var_info;
 
 }
-
-
-=head
-sub getGenotypesForSingleVariant{
-
-  my ($self, $data, $vf ) = @_;
-
-  my @datasetsreq = sort(keys %{$data->{files}});
-
-  foreach my $ds(@datasetsreq){
-  
-    my $file = $self->{dir} .'/'. $data->{files}->{$current_ds};
-
-    my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $file ) || die "Failed to get parser : $!\n";
-    $parser->seek($vf->seq_region_name() ,$vf->seq_region_start(), $vf->seq_region_end());
-
-=cut
 
 
 
