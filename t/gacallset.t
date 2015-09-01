@@ -33,56 +33,15 @@ Catalyst::Test->import('EnsEMBL::REST');
 
 my $base = '/ga4gh/callsets/search';
 
-my $post_data1 = '{ "pageSize": 2,  "pageToken":"" }';
+
 my $post_data2 = '{ "pageSize": 2,  "variantSetId":2,"pageToken":"" }';
 my $post_data3 = '{ "pageSize": 2,  "variantSetId":1, "name": "HG00097", "pageToken":"" }';
 
-my $expected_data1 = {                             
-  callSets => [                
-    {                          
-      id => 'HG00096',         
-      info => {                
-        assembly_version => [  
-          'GRCh37'             
-        ],
-        variantSetName => [
-          '1000 Genomes phase1'
-        ]
-      },                       
-      name => 'HG00096',       
-      sampleId => 'HG00096',   
-      variantSetIds => [       
-        '1'
-      ],
-      created => '1432745640000',
-      updated => '1432745640000'                        
-    },                         
-    {                          
-      id => 'HG00097',         
-      info => {                
-        assembly_version => [  
-          'GRCh37'             
-        ],
-        variantSetName => [
-          '1000 Genomes phase1' 
-        ]                    
-      },                       
-      name => 'HG00097',       
-      sampleId => 'HG00097',   
-      variantSetIds => [       
-        '1'                   
-      ],
-      created => '1432745640000',
-      updated => '1432745640000' 
-    }                          
-  ],                           
-  pageToken => 3              
-} ;
 
 my $expected_data2 = {
 callSets => [               
     {                         
-      id => 'NA12878',        
+      id => '2:NA12878',        
       info => {               
         assembly_version => [ 
           'GRCh37'            
@@ -99,13 +58,14 @@ callSets => [
       created => '1419292800000',
       updated => '1419292800000',
     }                         
-  ]                           
+  ],
+  nextPageToken => undef                           
  };  
 
 my $expected_data3 = {
 callSets => [
  {
-      id => 'HG00097',
+      id => '1:HG00097',
       info => {
         assembly_version => [
           'GRCh37'
@@ -123,11 +83,9 @@ callSets => [
       updated => '1432745640000'
     }
   ],
+  nextPageToken => undef
 } ;
 
-
-my $json1 = json_POST( $base, $post_data1, 'callsets' );
-eq_or_diff($json1, $expected_data1, "Checking the result from the gacallset endpoint");
 
 my $json2 = json_POST($base, $post_data2, 'callsets by variantset');
 eq_or_diff($json2, $expected_data2, "Checking the result from the gacallset endpoint - by variantset");
@@ -138,10 +96,10 @@ eq_or_diff($json3, $expected_data3, "Checking the result from the gacallset endp
 ## GET
  
 $base =~ s/\/search//;
-my $id = 'HG00097';
+my $id = '1:HG00097';
 my $json_get = json_GET("$base/$id", 'get callset');
 
-my $expected_get_data =  { id => 'HG00097',
+my $expected_get_data =  { id => '1:HG00097',
       info => {
         assembly_version => [
           'GRCh37'

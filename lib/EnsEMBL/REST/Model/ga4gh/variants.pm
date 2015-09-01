@@ -81,13 +81,15 @@ sub get_VCFcollection{
   
 
 ## format sample names if filtering by sample required
+## callSetIds = VariantSetID:samplename
 sub check_sample_info{
 
   my ($self, $callSetIds ) = @_;
 
   my %req_samples; 
 
-  foreach my $sample ( @{$callSetIds} ){
+  foreach my $callsetId ( @{$callSetIds} ){
+    my $sample = (split/\:/,$callsetId)[1];
     $req_samples{$sample} = 1;
   }
 
