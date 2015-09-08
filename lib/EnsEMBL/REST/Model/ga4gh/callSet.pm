@@ -128,7 +128,7 @@ sub fetch_batch{
       ## save info
       my $callset;
       $callset->{sampleId}       = $sample_name;
-      $callset->{id}             = $sample_name;
+      $callset->{id}             = $vcf_collection->id() . ":" . $sample_name;
       $callset->{name}           = $sample_name;
       $callset->{variantSetIds}  = [$vcf_collection->id()]; 
       $callset->{info}           = {"assembly_version" => [ $vcf_collection->assembly() ],
@@ -158,7 +158,10 @@ sub get_callSet{
 
   my $c = $self->context();
 
-  my $data = {req_callset => $id};
+  my ( $variantSetId, $callSetName) = split /\:/, $id;
+  my $data = { req_callset => $callSetName,
+               variantSetId => $variantSetId
+             };
 
   ## extract required call set 
   my ($callSets, $newPageToken ) = $self->fetch_batch($data);

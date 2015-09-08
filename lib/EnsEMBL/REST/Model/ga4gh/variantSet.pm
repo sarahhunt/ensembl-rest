@@ -98,7 +98,7 @@ sub fetch_sets{
 
     ## paging - skip if already returned
     next if $varset_id < $next_set_id;
-print "got ". md5_hex($vc_ob{$varset_id}->source_name()) ." for ". $vc_ob{$varset_id}->source_name() ."\n";
+
     ## limit by data set if required
     next if defined $data->{datasetId} && $data->{datasetId} ne ''
       &&  md5_hex($vc_ob{$varset_id}->source_name()) ne $data->{datasetId} ; 
@@ -106,10 +106,8 @@ print "got ". md5_hex($vc_ob{$varset_id}->source_name()) ." for ". $vc_ob{$varse
     ## set next token and stop storing if page size reached
     if (defined $data->{pageSize} &&  $n == $data->{pageSize}){
       $newPageToken = $varset_id if defined $data->{pageSize} && $n == $data->{pageSize};
- print "finished batch\n";    
-  last;
+      last;
     }
-
 
 
     ## extract required info
