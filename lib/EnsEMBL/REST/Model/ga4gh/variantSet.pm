@@ -67,8 +67,8 @@ sub fetch_sets{
   my $data = shift;
 
   ## varset id to start from is the page token - start from 0 if none supplied
-  my $next_set_id = 0;
-  $next_set_id    = $data->{pageToken} if ( defined $data->{pageToken} && $data->{pageToken} ne "");
+#  my $next_set_id = 0;
+#  $next_set_id    = $data->{pageToken} if ( defined $data->{pageToken} && $data->{pageToken} ne "");
 
 
   ## read config
@@ -87,7 +87,8 @@ sub fetch_sets{
   my @varsets;
   my $n = 0;
   my $newPageToken; ## save id of next variantSet to start with
- 
+  my $start = 1; 
+  $start = 0 if defined $data->{pageToken};
 
   foreach my $varset_id(sort sort_num(keys %vc_ob )) {
 
@@ -97,7 +98,8 @@ sub fetch_sets{
       && $varset_id ne $data->{req_variantset};
 
     ## paging - skip if already returned
-    next if $varset_id < $next_set_id;
+    $start = 1 if $start == 0 && $varset_id eq $data->{pageToken};
+    next if $start ==0;
 
     ## limit by data set if required
     next if defined $data->{datasetId} && $data->{datasetId} ne ''

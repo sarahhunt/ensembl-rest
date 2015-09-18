@@ -67,11 +67,10 @@ sub get_VCFcollection{
 
   my ($self, $variantSetId ) = @_;
 
-
+  $ENV{ENSEMBL_VARIATION_VCF_ROOT_DIR} = $self->{geno_dir};
   $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
   my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
 
- 
   my $vcf_coll = $vca->fetch_by_id($variantSetId);
 
   $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
@@ -137,7 +136,7 @@ sub sort_genotypes {
       !defined $data->{req_samples}->{$sample};
 
     my $gen_hash;
-    $gen_hash->{callSetId}    = $sample;
+    $gen_hash->{callSetId}    =  $data->{variantSetId} .":". $sample;
     $gen_hash->{callSetName}  = $sample;
 
     my @g = split/\||\//, $geno_strings->{$sample}->{GT};
@@ -148,13 +147,11 @@ sub sort_genotypes {
 
     ## place holders
     $gen_hash->{phaseset}           = '';
-    if( $is_remapped ){
-      ## minimal data relevant if remapped
-      $gen_hash->{genotypeLikelihood} = [];
-      $gen_hash->{info}               = {};
-    }
-    else{
-
+    $gen_hash->{genotypeLikelihood} = [];
+    $gen_hash->{info}               = {};
+    
+    unless( $is_remapped ){
+      ## meta data may not be relevant if variant remapped rather than recalled
       foreach my $inf (keys %{$geno_strings->{$sample}} ){
         next if $inf eq 'GT';
         if( $inf eq 'GL'){
@@ -189,25 +186,27 @@ sub get_next_by_token{
 
 
   ## look up filename from vcf collection object
-  my $file  =  $data->{vcf_collection}->filename_template(); 
-  $file =~ s/\#\#\#CHR\#\#\#/$data->{referenceName}/;
-  $file = $self->{geno_dir} .'/'. $file;
+  my $file  =  $data->{vcf_collection}->filename_template();
 
- # return these ordered by position for simple pagination
+  ## hack for compliance suite - sort out when references finalised & added
+  $data->{referenceName} =~ s/ref_brca1/17/;
+
+  $file =~ s/\#\#\#CHR\#\#\#/$data->{referenceName}/;
+
+  # return these ordered by position for simple pagination
   my @var;
   my $nextToken;
 
   ## exits here if unsupported chromosome requested
   return (\@var, $nextToken) unless -e $file;
-
+#warn "seeking: $data->{referenceName}, $data->{pageToken}, $data->{end} in $file\n";
   my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $file ) || die "Failed to get parser : $!\n";
   $parser->seek($data->{referenceName}, $data->{pageToken}, $data->{end});
-
 
   my $n = 0;
 
   while($n < ($data->{pageSize} + 1)){
-    
+
     my $got_something = $parser->next();
     last if $got_something ==0;
 
@@ -216,7 +215,7 @@ sub get_next_by_token{
     if ($n == $data->{pageSize} ){
       ## batch complete 
       ## save next position for new page token
-      $nextToken = $parser->get_raw_start;
+      $nextToken = $parser->get_raw_start -1;
       last;
     }
 
@@ -337,8 +336,8 @@ sub getVariant{
    $variation_hash->{start}           = $varfeat->seq_region_start() -1;
    ## open end of interval
    $variation_hash->{end}             = $varfeat->seq_region_end();
-   $variation_hash->{created}         = 'null';
-   $variation_hash->{updated}         = 'null';
+   $variation_hash->{created}         = '';
+   $variation_hash->{updated}         = '';
 
    return $variation_hash;
 }

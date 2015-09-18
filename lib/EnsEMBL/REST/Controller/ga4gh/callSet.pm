@@ -55,6 +55,9 @@ sub get_request: Chained('/') PathPart('ga4gh/callsets/search') ActionClass('RES
 
 #  $c->log->debug(Dumper $post_data);
 
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "variantSetId" key in your request'])
+    unless exists $post_data->{variantSetId};
+
   my $callSet;
 
   ## set a default page size if not supplied or not a number

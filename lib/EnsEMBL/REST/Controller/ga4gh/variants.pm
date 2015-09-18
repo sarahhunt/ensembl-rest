@@ -53,7 +53,7 @@ sub searchVariants_POST {
 
   my $post_data = $c->req->data;
 
-#  $c->log->debug(Dumper $post_data);
+  $c->log->debug(Dumper $post_data);
 
   ## required by spec, so check early
   $c->go( 'ReturnError', 'custom', [ ' Cannot find "referenceName" key in your request' ] )

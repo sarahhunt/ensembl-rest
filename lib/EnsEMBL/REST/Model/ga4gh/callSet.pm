@@ -53,10 +53,10 @@ sub fetch_callSets {
 
   my ($self, $data ) = @_;
 
-  my ($callsets, $newPageToken ) = $self->fetch_batch($data);
+  my ($callsets, $nextPageToken ) = $self->fetch_batch($data);
 
-  my $return_data = { callSets  => $callsets} ;
-  $return_data->{pageToken} = $newPageToken if defined $newPageToken ;
+  my $return_data = { callSets  => $callsets, 
+                      nextPageToken => $nextPageToken }; 
 
   return $return_data;
 }
@@ -75,70 +75,61 @@ sub fetch_batch{
   my $self = shift;
   my $data = shift;
 
-  ## ind_id to start taken from page token - start from 0 if none supplied [!!put ids back]
+  ## the position in the callset array to start from is either the pageToken or 0 if none supplied 
   $data->{pageToken} = 0  if (! defined $data->{pageToken} || $data->{pageToken} eq "");
-  my $next_ind_id   =  $data->{pageToken} ;
 
   my @callsets;
-  my $n = 1;
-  my $newPageToken; ## save id of next individual to start with
+  my $newPageToken; ## save position of next callset to start with
+  my $count_ind = 0; ## for batch size & paging
+
 
   $ENV{ENSEMBL_VARIATION_VCF_ROOT_DIR} = $self->{geno_dir};
   $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
   my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
-  
-  my %collections; 
-  foreach my $vcf_collection ( @{$vca->fetch_all} ){
-    $collections{$vcf_collection->id()} = $vcf_collection;
-  }
 
-  my $count_ind = 0;## for paging
-  foreach my $vcfc_id (sort sort_num keys %collections){
-    my $vcf_collection = $collections{$vcfc_id};
+  my $vcf_collection = $vca->fetch_by_id($data->{variantSetId});
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
+    unless defined $vcf_collection; 
 
-    $vcf_collection->use_db(0);
-    ## filter by variant set if required
-    next if defined $data->{variantSetId} && $data->{variantSetId} ne ''  &&
-      $data->{variantSetId} ne  $vcf_collection->id() ;
+  $vcf_collection->use_db(0);
 
-    ## loop over callSets
-    my $samples = $vcf_collection->get_all_Samples(); ## returned sorted
+  ## loop over callSets
+  my $samples = $vcf_collection->get_all_Samples(); ## returned sorted
 
-    foreach my $sample (@{$samples}){ 
+  for (my $n = $data->{pageToken}; $n < scalar(@{$samples}); $n++) {  
 
-      my $sample_name = $sample->name();
-      ## stop if there are enough saved for the required batch size
-      last if defined  $newPageToken ;
+    ## stop if there are enough saved for the required batch size
+    last if defined  $newPageToken ;
 
+    my $sample_name = $samples->[$n]->name();
+    my $sample_id   = $data->{variantSetId} . ":" . $sample_name;
 
-      ## filter by name if required
-      next if defined $data->{name} && $sample_name !~ /$data->{name}/; 
+    ## filter by name if required
+    next if defined $data->{name} && $sample_name !~ /$data->{name}/; 
 
-      ## filter by id from GET request (these will be different to names eventually)
-      next if defined $data->{req_callset} && $sample_name !~ /$data->{req_callset}/;
+    ## filter by id from GET request
+    next if defined $data->{req_callset} && $sample_id !~ /$data->{req_callset}/;
  
 
-      ## paging
-      $count_ind++;
-      ## skip ind already reported
-      next if $count_ind <$next_ind_id;
-      $newPageToken = $count_ind + 1  if (defined  $data->{pageSize}  &&  $data->{pageSize} =~/\w+/ && $n == $data->{pageSize});
+    ## if requested batch size reached set new page token
+    $count_ind++;
+    $newPageToken = $n + 1  if (defined  $data->{pageSize} &&  
+                                 $data->{pageSize} =~/\w+/ && 
+                                 $count_ind == $data->{pageSize} &&
+                                 $n +1 < scalar(@{$samples}) ); ## is there anything left?
 
+    ## save info
+    my $callset;
+    $callset->{sampleId}       = $sample_name;
+    $callset->{id}             = $sample_id;
+    $callset->{name}           = $sample_name;
+    $callset->{variantSetIds}  = [$vcf_collection->id()]; 
+    $callset->{info}           = {"assembly_version" => [ $vcf_collection->assembly() ],
+                                  "variantSetName"   => [ $vcf_collection->source_name()] };
+    $callset->{created}        = $vcf_collection->created();
+    $callset->{updated}        = $vcf_collection->updated();
+    push @callsets, $callset;
 
-      ## save info
-      my $callset;
-      $callset->{sampleId}       = $sample_name;
-      $callset->{id}             = $vcf_collection->id() . ":" . $sample_name;
-      $callset->{name}           = $sample_name;
-      $callset->{variantSetIds}  = [$vcf_collection->id()]; 
-      $callset->{info}           = {"assembly_version" => [ $vcf_collection->assembly() ],
-                                    "variantSetName"   => [ $vcf_collection->source_name()] };
-      $callset->{created}        = $vcf_collection->created();
-      $callset->{updated}        = $vcf_collection->updated();
-      push @callsets, $callset;
-      $n++; ## keep track of batch size
-
-    }
   }
 
   return (\@callsets, $newPageToken);

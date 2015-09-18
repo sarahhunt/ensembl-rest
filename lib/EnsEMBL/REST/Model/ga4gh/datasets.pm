@@ -90,7 +90,6 @@ sub sort_collections{
 
   my %collections;
   foreach my $collection(@{$vca->fetch_all} ) { 
-
     my $ga_id = md5_hex($collection->source_name());
     $collections{$ga_id} = $collection;
   }

@@ -55,6 +55,10 @@ sub get_request: Chained('/') PathPart('ga4gh/variantsets/search') ActionClass('
   my $post_data = $c->req->data;
 
   #$c->log->debug(Dumper $post_data);
+
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "datasetId" key in your request'])
+    unless exists $post_data->{datasetId};
+
   ## set a default page size if not supplied or not a number
   $post_data->{pageSize} = 10 unless (defined  $post_data->{pageSize} &&  
                                       $post_data->{pageSize} =~ /\d+/ &&
