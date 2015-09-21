@@ -199,7 +199,7 @@ sub get_next_by_token{
 
   ## exits here if unsupported chromosome requested
   return (\@var, $nextToken) unless -e $file;
-#warn "seeking: $data->{referenceName}, $data->{pageToken}, $data->{end} in $file\n";
+ #warn "seeking: $data->{referenceName}, $data->{pageToken}, $data->{end} in $file\n";
   my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $file ) || die "Failed to get parser : $!\n";
   $parser->seek($data->{referenceName}, $data->{pageToken}, $data->{end});
 
@@ -239,7 +239,7 @@ sub get_next_by_token{
     $variation_hash->{calls}           = $genotype_calls;
 
     $variation_hash->{names}           = [ $name ];
-    $variation_hash->{id}              = $name;
+    $variation_hash->{id}              = $data->{variantSetId} .":".$name;
     $variation_hash->{referenceBases}  = $parser->get_reference;
     $variation_hash->{alternateBases}  = \@{$parser->get_alternatives};
     $variation_hash->{referenceName}   = $parser->get_seqname ;
@@ -286,7 +286,7 @@ sub get_next_by_token{
 
   Gets a Variant by ID.
   GET /variants/{id} will return a JSON version of Variant.
-
+  id is currently variantset_id:variantname
 =cut
 
 sub getVariant{
@@ -302,15 +302,20 @@ sub getVariant{
 
   $vfa->db->include_failed_variations(0); ## don't extract multi-mapping variants
  
-  my $var = $va->fetch_by_name($id);
+  my ($variantSetId, $variantId) = split/\:/, $id;
+
+warn "Looking for set :$variantSetId, var: $variantId \n";
+
+  my $var = $va->fetch_by_name($variantId);
   my $vf  = $vfa->fetch_all_by_Variation($var) if defined $var;  
 
   if (defined $vf->[0]) {
     $varfeat = $vf->[0];
-    ## retrun 1KG data by default if available 
-    my $var_info = $self->getSingleCallSets($vf->[0], $id);
+
+    ## return genotype data 
+    my $var_info = $self->getSingleCallSets($vf->[0], $variantSetId, $variantId);
  
-    return ({ "variants"      => [$var_info]}) if exists $var_info->[0]->{name} ;   
+    return ( $var_info->[0] ) if exists $var_info->[0]->{id} ;   
   }
   elsif($id =~/\w+\:c\.\w+|\w+\:g\.\w+|\w+\:p\.\w+/ ){
     ## try to look up as HGVS
@@ -322,22 +327,23 @@ sub getVariant{
 
   ## return basic location info if available
 
-   my $variation_hash;
+  my $variation_hash;
 
-   my @als = split/\//, $varfeat->allele_string();
-   shift @als; ## remove reference allele
-   $variation_hash->{name}            = $varfeat->variation_name();
-   $variation_hash->{id}              = $id;
-   $variation_hash->{referenceBases}  = $varfeat->ref_allele_string();
-   $variation_hash->{alternateBases}  = \@als;
-   $variation_hash->{referenceName}   = $varfeat->seq_region_name();
+  my @als = split/\//, $varfeat->allele_string();
+  shift @als; ## remove reference allele
+  $variation_hash->{name}            = $varfeat->variation_name();
+  $variation_hash->{id}              = $id;
+  $variation_hash->{referenceBases}  = $varfeat->ref_allele_string();
+  $variation_hash->{alternateBases}  = \@als;
+  $variation_hash->{referenceName}   = $varfeat->seq_region_name();
 
-   ## position is zero-based + closed start of interval 
-   $variation_hash->{start}           = $varfeat->seq_region_start() -1;
-   ## open end of interval
-   $variation_hash->{end}             = $varfeat->seq_region_end();
-   $variation_hash->{created}         = '';
-   $variation_hash->{updated}         = '';
+  ## position is zero-based + closed start of interval 
+  $variation_hash->{start}           = $varfeat->seq_region_start() -1;
+  ## open end of interval
+  $variation_hash->{end}             = $varfeat->seq_region_end();
+
+  $variation_hash->{created}         = '';
+  $variation_hash->{updated}         = '';
 
    return $variation_hash;
 }
@@ -349,18 +355,24 @@ look up a default set of genotypes if queried by id
 =cut
 sub getSingleCallSets{
 
- my ($self, $varfeat, $id ) = @_;
+ my ($self, $varfeat, $variantSetId, $varname ) = @_;
 
   my $data;
   $data->{referenceName} = $varfeat->seq_region_name();
-  $data->{start}         = $varfeat->seq_region_start() -1;
+  $data->{start}         = $varfeat->seq_region_start() -2;
   $data->{end}           = $varfeat->seq_region_end();
-  $data->{variantsetId}  = 1; ## return 1KG by default
-  $data->{variantName}   = $id; ## check for supplied name not current database mane
+  $data->{variantSetId}  = $variantSetId;
+  $data->{variantName}   = $varname; ## check for supplied name not current database mane
 
+
+  ## hack for compliance data - create as fake ALT??
+  if($variantSetId ==10){
+    $data->{start} = $data->{start} - 41196312;
+    $data->{end }  = $data->{end} - 41196312;
+  }
 
   ## load VCFcollections object for variantSet 
-  $data->{vcf_collection} = $self->get_VCFcollection($data->{variantsetId});
+  $data->{vcf_collection} = $self->get_VCFcollection($data->{variantSetId});
 
   ## create fake token -what should really be returned for get??
   $data->{pageSize} = 1;
