@@ -49,6 +49,9 @@ sub searchReferences_POST {
  
   my $references;
 
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "referenceSetId" key in your request' ] )
+    unless exists $c->req->data->{referenceSetId} ;
+
   try {
     $references = $c->model('ga4gh::references')->fetch_references( $c->req->data );
   } catch {

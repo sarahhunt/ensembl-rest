@@ -42,15 +42,15 @@ BEGIN {extends 'Catalyst::Controller::REST'; }
 sub searchReferenceSets_POST {
   my ( $self, $c ) = @_;
  
-  my $referenceSet;
+  my $referenceSets;
 
   try {
-    $referenceSet = $c->model('ga4gh::referenceSets')->fetch_referenceSet( $c->req->data );
+    $referenceSets = $c->model('ga4gh::referenceSets')->searchReferenceSet( $c->req->data );
   } catch {
     $c->go('ReturnError', 'from_ensembl', [$_]);
   };
 
-  $self->status_ok($c, entity => $referenceSet); 
+  $self->status_ok($c, entity => $referenceSets); 
 
 }
 
