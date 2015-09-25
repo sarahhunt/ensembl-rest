@@ -27,9 +27,9 @@ sub build_per_context_instance {
   return $self->new({ context => $c, %$self, @args });
 }
 
-### using assembly name as id pending core support for sequence md5's 
+### using md5 of concatenated sequence MD5s as id
 
-sub fetch_referenceSet {
+sub searchReferenceSet {
   
   my $self = shift;
 
@@ -37,25 +37,104 @@ sub fetch_referenceSet {
   
   my $post_data = $c->req->data;
 
-  $c->log->debug(Dumper $post_data);
+#  $c->log->debug(Dumper $post_data);
 
-  $c->go( 'ReturnError', 'custom', [ ' Error - search by md5sum not currently supported'])
-    if exists $post_data->{md5checksums} ;
+  my ( $referenceSets, $nextPageToken)  =  $self->fetchData( $post_data );
+  return ({ referenceSets => $referenceSets,
+            nextPageToken => $nextPageToken });
 
-  
-  $c->go( 'ReturnError', 'custom', [ ' Error - search by accession not currently supported'])
-    if exists $post_data->{accessions} ;
+}
 
-  return $self->getReferenceSet( $post_data->{assemblyId} );
+sub getReferenceSet {
+
+  my $self = shift;
+  my $id = shift;
+
+  my $data;
+  $data->{id} = $id;
+  my ($referenceSets, $pageToken) =  $self->fetchData( $data );
+
+  return ($referenceSets->[0]);
 
 }
 
 
-sub getReferenceSet{
+## send both post & get here as few sets to check
 
-  my ($self,  $get_id ) = @_; 
+sub fetchData{
+
+  my ($self,  $data ) = @_; 
 
   my $c = $self->context();
+
+  ## read config
+  my $referenceSets = $self->read_config();
+
+  my @referenceSets;
+
+  $data->{pageToken} = 0 unless defined $data->{pageToken}; 
+  my $nextPageToken;
+  my $count = 0;
+  foreach( my $n = $data->{pageToken}; $n <  scalar @{$referenceSets}; $n++ ) {
+
+    my $refset_hash = $referenceSets->[$n];
+
+    ## filter if an attrib supplied
+    next if defined $data->{id}          &&  $data->{id}          ne $refset_hash->{id}; ##  GET
+    next if defined $data->{md5checksum} &&  $data->{md5checksum} ne $refset_hash->{md5};
+    next if defined $data->{accession}   &&  $data->{accession}   ne $refset_hash->{accession}->[0]; ##FIX for other accessions
+    next if defined $data->{assemblyId}  &&  $data->{assemblyId}  ne $refset_hash->{id};
+
+    if (defined $data->{pageSize} && $count == $data->{pageSize}){
+      $nextPageToken = $n;
+      last;
+    }
+
+    my $referenceSet;
+    $referenceSet->{id}           = $refset_hash->{id};
+    $referenceSet->{name}         = $refset_hash->{name};
+    $referenceSet->{md5checksum}  = $refset_hash->{md5};
+    $referenceSet->{ncbiTaxonId}  = $refset_hash->{ncbiTaxonId};
+    $referenceSet->{description}  = "Homo sapiens " . $refset_hash->{id};
+    $referenceSet->{assemblyId}   = $refset_hash->{id};
+    $referenceSet->{sourceURI}    = 'ftp://ftp.ensembl.org/pub/release-80/fasta/homo_sapiens/dna/';  ##FIX!
+    $referenceSet->{sourceAccessions} = $refset_hash->{sourceAccessions} ;
+    $referenceSet->{isDerived}    = $refset_hash->{isDerived};
+
+    push @referenceSets, $referenceSet;
+
+    $count++;
+  }
+
+  return (\@referenceSets, $nextPageToken);
+
+}
+
+
+##read config from JSON file
+
+sub read_config{
+
+  my $self = shift;
+
+  open IN, $self->{ga_reference_config} ||
+    $self->context()->go( 'ReturnError', 'custom', ["ERROR: Could not read from config file $self->{ga_reference_config}"]);
+  local $/ = undef;
+  my $json_string = <IN>;
+  close IN;
+
+
+  my $config = JSON->new->decode($json_string) ||
+    $self->context()->go( 'ReturnError', 'custom', ["ERROR: Failed to parse config file $self->{ga_reference_config}"]);
+
+  $self->context()->go( 'ReturnError', 'custom', [ " No data available " ] )
+    unless $config->{referenceSets} && scalar @{$config->{referenceSets}};
+
+  return $config->{referenceSets};
+}
+
+
+=head don't take from db as compliance data is fake 
 
   my $core_ad = $c->model('Registry')->get_DBAdaptor($species, 'Core',    );
   my $cmeta_ext_sth = $core_ad->dbc->db_handle->prepare(qq[ select meta_key, meta_value from meta]);
@@ -80,12 +159,15 @@ sub getReferenceSet{
   $referenceSet->{assemblyId}   = $meta{"assembly.name"};
   $referenceSet->{sourceURI}    = 'ftp://ftp.ensembl.org/pub/release-80/fasta/homo_sapiens/dna/';  ##FIX!
   $referenceSet->{sourceAccessions} =[ $meta{"assembly.accession"}];
-  $referenceSet->{isDerived}    = 'false';
+  $referenceSet->{isDerived}    = 'true';
 
 
   return { referenceSets => [$referenceSet]};
 
 }
+=cut
+
+
 
 
 1;

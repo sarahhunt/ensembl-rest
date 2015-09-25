@@ -92,7 +92,8 @@ sub fetch_sets{
 
   foreach my $varset_id(sort sort_num(keys %vc_ob )) {
 
-
+   my $datasetId = md5_hex($vc_ob{$varset_id}->source_name());
+print "Found dataset:  $datasetId";
     ## limit by variant set if required (for GET)
     next if defined  $data->{req_variantset} && $data->{req_variantset} ne '' 
       && $varset_id ne $data->{req_variantset};
@@ -103,7 +104,7 @@ sub fetch_sets{
 
     ## limit by data set if required
     next if defined $data->{datasetId} && $data->{datasetId} ne ''
-      &&  md5_hex($vc_ob{$varset_id}->source_name()) ne $data->{datasetId} ; 
+      &&  $datasetId ne $data->{datasetId} ; 
 
     ## set next token and stop storing if page size reached
     if (defined $data->{pageSize} &&  $n == $data->{pageSize}){
@@ -128,7 +129,7 @@ sub fetch_sets{
 
     ## store
     $variantSet->{id}             = $varset_id;
-    $variantSet->{datasetId}      = md5_hex($vc_ob{$varset_id}->source_name());
+    $variantSet->{datasetId}      = $datasetId; 
     $variantSet->{metadata}       = \@{$meta};
     $variantSet->{referenceSetId} = $vc_ob{$varset_id}->assembly();
     push @varsets, $variantSet;
