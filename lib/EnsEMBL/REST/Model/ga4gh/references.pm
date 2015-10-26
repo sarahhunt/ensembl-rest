@@ -162,6 +162,9 @@ sub formatSlice{
   my $assembly = shift;
   my $md5      = shift;
 
+  ## hack - not updating GRCh37 seq:
+  $ens_ver  = 75 if $assembly =~/GRCh37/; 
+
   my %ref;
 
   $ref{start}  = 0; ##FIX
