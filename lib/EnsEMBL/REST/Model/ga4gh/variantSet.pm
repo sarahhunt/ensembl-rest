@@ -88,12 +88,12 @@ sub fetch_sets{
   my $n = 0;
   my $newPageToken; ## save id of next variantSet to start with
   my $start = 1; 
-  $start = 0 if defined $data->{pageToken};
+  $start = 0 if defined $data->{pageToken} && $data->{pageToken} ne '';
 
   foreach my $varset_id(sort sort_num(keys %vc_ob )) {
 
    my $datasetId = md5_hex($vc_ob{$varset_id}->source_name());
-print "Found dataset:  $datasetId";
+
     ## limit by variant set if required (for GET)
     next if defined  $data->{req_variantset} && $data->{req_variantset} ne '' 
       && $varset_id ne $data->{req_variantset};
@@ -119,19 +119,21 @@ print "Found dataset:  $datasetId";
     ## get info descriptions from one of the VCF files    
     my $meta = $self->get_info($vc_ob{$varset_id});
 
+    ### Most of this has been promoted to named fields now
     ## add summary of essential info for meta for the data set from the config
-    foreach my $key ( "source_name", "source_url"){
-      my %meta;
-      $meta{key}   = $key;
-      $meta{value} = $vc_ob{$varset_id}->$key;
-      push @{$meta}, \%meta;
-    }
+#    foreach my $key ( "source_url"){
+#      my %meta;
+#      $meta{key}   = $key;
+#      $meta{value} = $vc_ob{$varset_id}->$key;
+#      push @{$meta}, \%meta;
+#    }
 
     ## store
     $variantSet->{id}             = $varset_id;
     $variantSet->{datasetId}      = $datasetId; 
     $variantSet->{metadata}       = \@{$meta};
     $variantSet->{referenceSetId} = $vc_ob{$varset_id}->assembly();
+    $variantSet->{name}           = $vc_ob{$varset_id}->source_name();
     push @varsets, $variantSet;
     $n++;
    
