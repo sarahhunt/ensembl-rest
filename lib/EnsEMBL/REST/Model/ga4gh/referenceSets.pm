@@ -97,7 +97,7 @@ sub fetchData{
     $referenceSet->{ncbiTaxonId}  = $refset_hash->{ncbiTaxonId};
     $referenceSet->{description}  = "Homo sapiens " . $refset_hash->{id};
     $referenceSet->{assemblyId}   = $refset_hash->{id};
-    $referenceSet->{sourceURI}    = 'ftp://ftp.ensembl.org/pub/release-80/fasta/homo_sapiens/dna/';  ##FIX!
+    $referenceSet->{sourceURI}    = $refset_hash->{sourceURI}; 
     $referenceSet->{sourceAccessions} = $refset_hash->{sourceAccessions} ;
     $referenceSet->{isDerived}    = $refset_hash->{isDerived};
 
