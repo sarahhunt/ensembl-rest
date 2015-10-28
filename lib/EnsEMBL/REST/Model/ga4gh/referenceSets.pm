@@ -37,7 +37,7 @@ sub searchReferenceSet {
   
   my $post_data = $c->req->data;
 
-#  $c->log->debug(Dumper $post_data);
+  #$c->log->debug(Dumper $post_data);
 
   my ( $referenceSets, $nextPageToken)  =  $self->fetchData( $post_data );
   return ({ referenceSets => $referenceSets,
@@ -54,6 +54,9 @@ sub getReferenceSet {
   $data->{id} = $id;
   my ($referenceSets, $pageToken) =  $self->fetchData( $data );
 
+  $self->context()->go( 'ReturnError', 'custom', ["ERROR: no data for ReferenceSet $id"])
+    unless defined $referenceSets &&  ref($referenceSets) eq 'ARRAY' ;
+ 
   return ($referenceSets->[0]);
 
 }
@@ -69,23 +72,36 @@ sub fetchData{
 
   ## read config
   my $referenceSets = $self->read_config();
+  my $nextPageToken;
+
+  ## return empty array if no sets available by this id (behaviour not fully specified)
+  return ( [], $nextPageToken) unless defined $referenceSets &&  ref($referenceSets) eq 'ARRAY' ;
+
 
   my @referenceSets;
 
-  $data->{pageToken} = 0 unless defined $data->{pageToken}; 
-  my $nextPageToken;
+  $data->{pageToken} = 0 unless defined $data->{pageToken} && $data->{pageToken} ne ''; 
+
   my $count = 0;
   foreach( my $n = $data->{pageToken}; $n <  scalar @{$referenceSets}; $n++ ) {
 
     my $refset_hash = $referenceSets->[$n];
 
     ## filter if an attrib supplied
-    next if defined $data->{id}          &&  $data->{id}          ne $refset_hash->{id}; ##  GET
-    next if defined $data->{md5checksum} &&  $data->{md5checksum} ne $refset_hash->{md5};
-    next if defined $data->{accession}   &&  $data->{accession}   ne $refset_hash->{accession}->[0]; ##FIX for other accessions
-    next if defined $data->{assemblyId}  &&  $data->{assemblyId}  ne $refset_hash->{id};
+    next if defined $data->{id}          &&  $data->{id}          ne '' 
+                                         &&  $data->{id}          ne $refset_hash->{id}; ##  GET
 
-    if (defined $data->{pageSize} && $count == $data->{pageSize}){
+    next if defined $data->{md5checksum} &&  $data->{md5checksum} ne ''
+                                         &&  $data->{md5checksum} ne $refset_hash->{md5};
+
+    next if defined $data->{accession}   &&  $data->{accession}   ne ''
+                                         &&  $data->{accession}   ne $refset_hash->{sourceAccessions}->[0]; ##FIX for other accessions
+
+    next if defined $data->{assemblyId}  &&  $data->{assemblyId}  ne ''
+                                         &&  $data->{assemblyId}  ne $refset_hash->{id};
+
+
+    if (defined $data->{pageSize} && $data->{pageSize} ne '' && $count == $data->{pageSize}){
       $nextPageToken = $n;
       last;
     }

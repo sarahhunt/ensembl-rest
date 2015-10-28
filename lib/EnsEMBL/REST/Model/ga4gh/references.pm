@@ -28,72 +28,74 @@ sub build_per_context_instance {
 }
 
 
-
+## POST
 sub fetch_references {
   
   my $self = shift;
 
-  my ($references, $nextPageToken);
+  my $post_data = $self->context()->req->data;
 
-  if ( $self->context->req->data->{referenceSetId} =~ /compliance/i){
-      ($references, $nextPageToken) =  $self->get_fake_data();
-  }
-  else{
-      ($references, $nextPageToken) =   $self->get_data();
-  }
+  my ($references, $nextPageToken) = $self->extract_data($post_data);
 
   return ({ references    => $references, 
             nextPageToken => $nextPageToken});
 }
 
 
-## read data from database & add MD5's from config
-sub get_data{
+### GET single reference by 'id'
+sub getReference{
 
-  my $self = shift;
+  my ($self,  $get_id ) = @_;
 
-  my $c = $self->context();
+  my ($reference, $assemblId) = $self->get_sequences($get_id);
 
-  my $post_data = $c->req->data;
+  $self->context()->go( 'ReturnError', 'custom', ["ERROR: no data for $get_id"])
+    unless defined $reference &&  ref($reference) eq 'HASH' ; 
+  my $formatted_reference = $self->format_sequence($reference, $assemblId);
+  return $formatted_reference;
 
-#  $c->log->debug(Dumper $post_data);
+}
+
+## fetch a sequence set & handle filters/paging 
+sub extract_data{
+
+  my $self      = shift;
+  my $post_data = shift;
 
   my @references;
   my $count = 0;
   my $nextToken;
-  $post_data->{pageToken} = 0 unless defined $post_data->{pageToken};
+  $post_data->{pageToken} = 0 unless defined $post_data->{pageToken} && $post_data->{pageToken} ne '';
+
+  ## look up ensembl version for ftp
+  my $ens_version = $self->get_ensembl_version();
 
 
   ## read config to get look up from seq name to MD5
-  my $seq_to_md5 = $self->get_md5_lookup();
+  my $refSeqSet = $self->get_sequenceset($post_data->{referenceSetId});
 
-  ## fetch version info needed for ftp path once
-  my ($ens_version, $assembly ) = $self->getVersion(); 
+  ## return empty array if no sequences for this set (behaviour not fully specified)
+  return ( [], $nextToken) unless defined $refSeqSet &&  ref($refSeqSet) eq 'HASH' ;
 
+  ## loop through available sequences
+  foreach (my $n = $post_data->{pageToken}; $n < scalar(@{$refSeqSet->{sequences}} ); $n++){
 
-  ## extract & loop through sequences
-  my $slice_ad = $c->model('Registry')->get_adaptor($species, 'Core', 'slice');
-  my @slices = @{$slice_ad->fetch_all('toplevel')};
+    my $refseq = $refSeqSet->{sequences}->[$n];
 
+    ## filter by any supplied attributes 
+    next if defined $post_data->{md5checksum} && $post_data->{md5checksum} ne '' 
+                                              && $post_data->{md5checksum} ne $refseq->{md5};
+    next if defined $post_data->{accession}   && $post_data->{accession}   ne ''
+                                              && $post_data->{accession}   ne $refseq->{sourceAccessions}->[0]; 
 
-  foreach (my $n = $post_data->{pageToken}; $n < scalar(@slices); $n++){
-
-    my $name   = $slices[$n]->seq_region_name();   
-    my $tmp_id = $slices[$n]->name(); 
-
-    ## filter by any supplied attributes
-    next unless defined $seq_to_md5->{$name}; ## patch sequence may not be in the set
-    next if defined $post_data->{md5checksum} && $post_data->{md5checksum} ne $seq_to_md5->{$name};
-    next if defined $post_data->{accession}   && $post_data->{accession} ne $slices[$n]->get_all_synonyms('RefSeq_genomic')->[0]->name(); 
-
-    ## rough paging - assuming order reliable
+    ## rough paging
     $count++;
-    if (defined $post_data->{pageSize} && $count > $post_data->{pageSize}){
+    if (defined $post_data->{pageSize} &&  $post_data->{pageSize} ne '' && $count > $post_data->{pageSize}){
       $nextToken = $n;
       last;
     }
-   
-    my $ref = $self->formatSlice($slices[$n], $ens_version, $assembly, $seq_to_md5->{$name} ); 
+
+    my $ref = $self->format_sequence($refseq, $refSeqSet->{id}, $ens_version); 
     push @references,  $ref;
   }
 
@@ -102,145 +104,90 @@ sub get_data{
 
 }
 
-
-### get single reference by 'id'
-
-sub getReference{
-
-  my ($self,  $get_id ) = @_; 
-
-  ## read config to get look up from MD5
-  my $config = $self->read_config();
-
-  my $seq;
-  foreach my $referenceSet (@{$config->{referenceSets}}){
-    foreach my $seqname( keys %{$referenceSet->{sequences}}){
-# warn "Found $seqname => " . $referenceSet->{sequences}->{$seqname} . " Looking for $get_id \n";
-      next if $referenceSet->{sequences}->{$seqname} ne $get_id ;
-
-      $seq->{name}  = $seqname;
-      $seq->{md5}   = $referenceSet->{sequences}->{$seqname};
-      $seq->{refset_id}   = $referenceSet->{name};## track if compliance 
-      $seq->{refset_name} = $referenceSet->{id};
-    }
-  }
-
-  ## exit if MD5 not found
-  $self->context()->go( 'ReturnError', 'custom', [ " No data available for this reference : $get_id" ] )
-    unless defined $seq->{name};
-
-
-  ## compliance suite uses fake data - not in db => handle separately
-  if( $seq->{refset_name} =~ /compliance/){
-    return $self->format_config_hash( $seq );
-  }
-  
-  ### look up full info from database
-
-  my $c = $self->context();
-
-  my $slice_ad = $c->model('Registry')->get_adaptor($species, 'Core', 'slice');
-
-  my $slice = $slice_ad->fetch_by_region('toplevel', $seq->{name});
-
-  ## exit if not current
-  $self->context()->go( 'ReturnError', 'custom', [ " No data available for this reference : $get_id" ] )
-    unless defined $slice;
-
-  my ($ens_version, $assembly ) = $self->getVersion();
-
-  my $reference = $self->formatSlice($slice, $ens_version, $assembly, $get_id);
-  return $reference;
-
-}
-
-sub formatSlice{
+sub format_sequence{
 
   my $self     = shift;
-  my $slice    = shift;
-  my $ens_ver  = shift;
+  my $seq      = shift;
   my $assembly = shift;
-  my $md5      = shift;
-
-  ## hack - not updating GRCh37 seq:
-  $ens_ver  = 75 if $assembly =~/GRCh37/; 
+  my $ens_ver  = shift;
 
   my %ref;
 
-  $ref{start}  = 0; ##FIX
-  $ref{length} = $slice->length();
-  $ref{id}     = $md5;
-  $ref{name}   = $slice->seq_region_name();
+  $ref{length}           = $seq->{length};
+  $ref{id}               = $seq->{md5};   ### is this the best approach?
+  $ref{name}             = $seq->{name};
+  $ref{md5checksum}      = $seq->{md5};
+  $ref{sourceAccessions} = $seq->{sourceAccessions}; 
+  $ref{isPrimary}        = $seq->{isPrimary};
 
-  my @alternative_names = @{$slice->get_all_synonyms('RefSeq_genomic')} ;
-  $ref{sourceAccessions}  = [ $alternative_names[0]->name()] if defined $alternative_names[0];
-  warn "Error- 2 accessions\n" if defined $alternative_names[1];
-
-  $ref{ncbiTaxonId} = 9609; 
-  $ref{isDerived}   = 'true'; ##ambiguity codes to Ns
-  $ref{isPrimary}   = 'true';
-
-  ## Fix these
-  $ref{sequenceId}  = $ref{id} ;
-  $ref{md5checksum} = $md5;
-  $ref{url} =  'ftp://ftp.ensembl.org/pub/release-'. $ens_ver .'/fasta/homo_sapiens/dna/Homo_sapiens.'. $assembly.'.dna.chromosome.' . $ref{name} . '.fa.gz' 
-   if length($ref{name})<3;
-
+  $ref{ncbiTaxonId}      = 9609; 
+  $ref{isDerived}        = 'true'; ##ambiguity codes to Ns
   $ref{sourceDivergence} = '';
 
+
+  ## define url - ensembl version not in config
+  if( $assembly =~ /compliance/){
+     $ref{sourceURI} = "https://github.com/ga4gh/compliance/blob/master/test-data/";
+  }
+  else{
+    $ens_ver  = 75 if $assembly =~/GRCh37/; 
+    $assembly =~ s/\.p13// if $assembly =~/GRCh37/;
+
+    $ref{sourceURI} =  'ftp://ftp.ensembl.org/pub/release-'. $ens_ver .'/fasta/homo_sapiens/dna/Homo_sapiens.'. $assembly.'.dna.chromosome.' . $ref{name} . '.fa.gz'; 
+  }
   return \%ref;
 
 }
 
-sub getVersion{
+sub get_ensembl_version{
 
   my $self  = shift;
 
   my $core_ad     = $self->context->model('Registry')->get_DBAdaptor($species, 'core');
   my $core_meta   = $core_ad->get_MetaContainer();
-  my $ens_version = $core_meta->schema_version();
 
-  my ($highest_cs) = @{$core_ad->get_CoordSystemAdaptor->fetch_all()};
-  my $assembly = $highest_cs->version();
-
-  return ($ens_version, $assembly );
+  return $core_meta->schema_version();
 
 }
 
-## TEMP: get md5's from config for get request 
-sub get_md5_lookup{
+## extract specific reference sequence from config data
+sub get_sequences{
+
+  my $self = shift;
+  my $id   = shift;
+
+  my $config = $self->read_config();
+
+  foreach my $referenceSet (@{$config->{referenceSets}}){
+    foreach my $seq (@{$referenceSet->{sequences}}){
+      return ($seq, $referenceSet->{id}) if $seq->{md5} eq $id;
+    } 
+  }
+}
+
+## extract specific reference set from config data
+sub get_sequenceset{
 
   my $self = shift;
   my $set  = shift;
 
   my $config = $self->read_config();
 
-  my $md5;
-
   foreach my $referenceSet (@{$config->{referenceSets}}){
-    next if defined $set && $referenceSet->{id} ne $set;
-
-    foreach my $seqname( keys %{$referenceSet->{sequences}}){
-      $md5->{$seqname} = $referenceSet->{sequences}->{$seqname};
-    }
+    return $referenceSet if $referenceSet->{id} eq $set;
   }
-  return $md5;
 }
 
-
-
-##read config from JSON file to get MD5's
+##read config from JSON file to get seq data grouped by set
 sub read_config{
 
   my $self = shift;
-  my $set  = shift;
 
   open IN, $self->{ga_reference_config} ||
     $self->context()->go( 'ReturnError', 'custom', ["ERROR: Could not read from config file $self->{ga_reference_config}"]);
   local $/ = undef;
   my $json_string = <IN>;
   close IN;
-
 
   my $config = JSON->new->decode($json_string) ||
     $self->context()->go( 'ReturnError', 'custom', ["ERROR: Failed to parse config file $self->{ga_reference_config}"]);
@@ -249,81 +196,6 @@ sub read_config{
     unless $config->{referenceSets} && scalar @{$config->{referenceSets}};
 
   return $config;
-}
-
-## compliance data is a random slice => not in the db
-## bolted on - should be handled better
-
-sub get_fake_data{
-
-  my $self = shift;
-
-  my $c = $self->context();
-
-  ## get array of sequences from config
-  my $refseqs = $self->sequences_from_config(); 
-
-  my $formatted_seqs;
-
-  foreach my $refseq(@{$refseqs}){
-
-    my $ref = $self->format_config_hash($refseq);
-    push @{$formatted_seqs}, $ref;
-  }
-  return $formatted_seqs;
-}
-
-## used by POST & GET
-sub format_config_hash {
-
-  my $self   = shift;
-  my $refseq = shift;
-  my $ref;
-
-  $ref->{id}          = $refseq->{md5};
-  $ref->{name}        = $refseq->{name};
-  $ref->{md5checksum} = $refseq->{md5};
-  $ref->{sequenceId}  = $refseq->{md5} ; ## what is better here?
-
-  ## Potential error
-  $ref->{ncbiTaxonId} = 9609;
-  $ref->{isDerived}   = 'true';
-  $ref->{isPrimary}   = 'true';
-  $ref->{url}         = 'https://github.com/ga4gh/compliance';
-
-  ## Fix these
-  $ref->{sourceAccessions}  = '';
-  $ref->{start}  = 0;
-  $ref->{length} = '';
-  $ref->{sourceDivergence} = ''; 
-
-  return $ref;
-}
-
-## compliance data not in db - get everything from config 
-sub get_sequences_from_config{
-
-  my $self = shift;
-  my $set  = shift;
-
-  my $config = $self->read_config();
-
-  my $refseqs;
-
-  foreach my $referenceSet (@{$config->{referenceSets}}){
-    next if $referenceSet->{id} ne $set;
-
-     foreach my $seqname( keys ${$referenceSet->{sequences}}){
-      
-      my $seq;
-      $seq->{name}        = $referenceSet->{name};
-      $seq->{md5}         = $referenceSet->{sequences}->{$seqname};
-      $seq->{refset_id}   = $referenceSet->{name};## track if compliance 
-      $seq->{refset_name} = $referenceSet->{id};
-      push @{$refseqs}, $seq;
-    }
-  }
-  return $refseqs;
 }
 
 
