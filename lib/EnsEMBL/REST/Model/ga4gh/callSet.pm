@@ -21,7 +21,8 @@ package EnsEMBL::REST::Model::ga4gh::callSet;
 use Moose;
 extends 'Catalyst::Model';
 use Data::Dumper;
-use Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor;
+
+use EnsEMBL::REST::Model::ga4gh::ga4gh_utils;
 
 with 'Catalyst::Component::InstancePerContext';
 
@@ -79,15 +80,10 @@ sub fetch_batch{
   $data->{pageToken} = 0  if (! defined $data->{pageToken} || $data->{pageToken} eq "");
 
   my @callsets;
-  my $newPageToken; ## save position of next callset to start with
+  my $nextPageToken; ## save position of next callset to start with
   my $count_ind = 0; ## for batch size & paging
 
-
-  $ENV{ENSEMBL_VARIATION_VCF_ROOT_DIR} = $self->{geno_dir};
-  $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
-  my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
-
-  my $vcf_collection = $vca->fetch_by_id($data->{variantSetId});
+  my $vcf_collection = $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($data->{variantSetId});
   $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
     unless defined $vcf_collection; 
 
@@ -99,7 +95,7 @@ sub fetch_batch{
   for (my $n = $data->{pageToken}; $n < scalar(@{$samples}); $n++) {  
 
     ## stop if there are enough saved for the required batch size
-    last if defined  $newPageToken ;
+    last if defined  $nextPageToken ;
 
     my $sample_name = $samples->[$n]->name();
     my $sample_id   = $data->{variantSetId} . ":" . $sample_name;
@@ -113,7 +109,7 @@ sub fetch_batch{
 
     ## if requested batch size reached set new page token
     $count_ind++;
-    $newPageToken = $n + 1  if (defined  $data->{pageSize} &&  
+    $nextPageToken = $n + 1  if (defined  $data->{pageSize} &&  
                                  $data->{pageSize} =~/\w+/ && 
                                  $count_ind == $data->{pageSize} &&
                                  $n +1 < scalar(@{$samples}) ); ## is there anything left?
@@ -132,7 +128,7 @@ sub fetch_batch{
 
   }
 
-  return (\@callsets, $newPageToken);
+  return (\@callsets, $nextPageToken);
 }
 
 

@@ -25,6 +25,7 @@ use Bio::EnsEMBL::IO::Parser::VCF4Tabix;
 use Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor;
 use Bio::EnsEMBL::Variation::VariationFeature;
 use Bio::EnsEMBL::Variation::DBSQL::VariationFeatureAdaptor;
+use EnsEMBL::REST::Model::ga4gh::ga4gh_utils;
 
 use Data::Dumper;
 with 'Catalyst::Component::InstancePerContext';
@@ -52,7 +53,9 @@ sub fetch_gavariant {
   my ($self, $data ) = @_; 
 
   ## get the VCF collection object for the required set
-  $data->{vcf_collection} = $self->get_VCFcollection($data->{variantSetId});
+  $data->{vcf_collection} =  $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($data->{variantSetId});
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
+    unless defined $data->{vcf_collection}; 
 
   ## format sample names if filtering by sample required
   $data->{req_samples} = $self->check_sample_info($data->{callSetIds}) if defined $data->{callSetIds}->[0] ;
@@ -61,24 +64,6 @@ sub fetch_gavariant {
   return $self->fetch_by_region($data);
 
 }
-
-## get VCFCollections object for required VariantSet
-sub get_VCFcollection{
-
-  my ($self, $variantSetId ) = @_;
-
-  $ENV{ENSEMBL_VARIATION_VCF_ROOT_DIR} = $self->{geno_dir};
-  $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
-  my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
-
-  my $vcf_coll = $vca->fetch_by_id($variantSetId);
-
-  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
-    unless defined $vcf_coll; 
-
-  return $vcf_coll;
-}
-  
 
 ## format sample names if filtering by sample required
 ## callSetIds = VariantSetID:samplename
@@ -306,8 +291,6 @@ sub getVariant{
  
   my ($variantSetId, $variantId) = split/\:/, $id;
 
-warn "Looking for set :$variantSetId, var: $variantId \n";
-
   my $var = $va->fetch_by_name($variantId);
   my $vf  = $vfa->fetch_all_by_Variation($var) if defined $var;  
 
@@ -374,7 +357,9 @@ sub getSingleCallSets{
   }
 
   ## load VCFcollections object for variantSet 
-  $data->{vcf_collection} = $self->get_VCFcollection($data->{variantSetId});
+  $data->{vcf_collection} = $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($data->{variantSetId});
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
+    unless defined $data->{vcf_collection}; 
 
   ## create fake token -what should really be returned for get??
   $data->{pageSize} = 1;

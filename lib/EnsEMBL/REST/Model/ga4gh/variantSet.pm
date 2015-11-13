@@ -23,6 +23,8 @@ extends 'Catalyst::Model';
 use Data::Dumper;
 use Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor;
 use Bio::EnsEMBL::IO::Parser::VCF4Tabix;
+use EnsEMBL::REST::Model::ga4gh::ga4gh_utils;
+
 use Digest::MD5 qw(md5_hex);
 
 with 'Catalyst::Component::InstancePerContext';
@@ -71,17 +73,8 @@ sub fetch_sets{
 #  $next_set_id    = $data->{pageToken} if ( defined $data->{pageToken} && $data->{pageToken} ne "");
 
 
-  ## read config
-  $ENV{ENSEMBL_VARIATION_VCF_ROOT_DIR} = $self->{geno_dir};
-  $Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor::CONFIG_FILE = $self->{ga_config};
-  my $vca = Bio::EnsEMBL::Variation::DBSQL::VCFCollectionAdaptor->new();
-
-  ## extract ids to sort for paging
-  my %vc_ob;
-  foreach my $vcf_collection( @{$vca->fetch_all} ) {
-    $vc_ob{$vcf_collection->id()} = $vcf_collection;
-  }
-
+  ## get hash of VariationSetId => VCF collection
+  my $vc_ob = $self->context->model('ga4gh::ga4gh_utils')->fetch_all_VariationSets();
 
   ## create response with correct number of variantSets
   my @varsets;
@@ -90,9 +83,9 @@ sub fetch_sets{
   my $start = 1; 
   $start = 0 if defined $data->{pageToken} && $data->{pageToken} ne '';
 
-  foreach my $varset_id(sort sort_num(keys %vc_ob )) {
+  foreach my $varset_id(sort sort_num(keys %{$vc_ob} )) {
 
-   my $datasetId = md5_hex($vc_ob{$varset_id}->source_name());
+   my $datasetId = md5_hex($vc_ob->{$varset_id}->source_name());
 
     ## limit by variant set if required (for GET)
     next if defined  $data->{req_variantset} && $data->{req_variantset} ne '' 
@@ -117,7 +110,7 @@ sub fetch_sets{
     my $variantSet;
 
     ## get info descriptions from one of the VCF files    
-    my $meta = $self->get_info($vc_ob{$varset_id});
+    my $meta = $self->get_info($vc_ob->{$varset_id});
 
     ### Most of this has been promoted to named fields now
     ## add summary of essential info for meta for the data set from the config
@@ -132,8 +125,8 @@ sub fetch_sets{
     $variantSet->{id}             = $varset_id;
     $variantSet->{datasetId}      = $datasetId; 
     $variantSet->{metadata}       = \@{$meta};
-    $variantSet->{referenceSetId} = $vc_ob{$varset_id}->assembly();
-    $variantSet->{name}           = $vc_ob{$varset_id}->source_name();
+    $variantSet->{referenceSetId} = $vc_ob->{$varset_id}->assembly();
+    $variantSet->{name}           = $vc_ob->{$varset_id}->source_name();
     push @varsets, $variantSet;
     $n++;
    

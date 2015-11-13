@@ -12,47 +12,47 @@ limitations under the License.
 =cut
 
 package EnsEMBL::REST::Model::ga4gh::referenceSets;
+our @ISA =('EnsEMBL::REST::Model::ga4gh');
 
 use Moose;
 extends 'Catalyst::Model';
 use Data::Dumper;
+use EnsEMBL::REST::Model::ga4gh::ga4gh_utils;
+
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
+use EnsEMBL::REST::Model::ga4gh::ga4gh_utils;
 
-our $species = 'homo_sapiens';
 
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
   return $self->new({ context => $c, %$self, @args });
 }
 
-### using md5 of concatenated sequence MD5s as id
-
+## POST entry point
 sub searchReferenceSet {
   
   my $self = shift;
 
-  my $c = $self->context();
-  
-  my $post_data = $c->req->data;
+  #$c->log->debug(Dumper $elf->context()->req->data);
 
-  #$c->log->debug(Dumper $post_data);
+  my ( $referenceSets, $nextPageToken)  =  $self->fetchData( $self->context()->req->data );
 
-  my ( $referenceSets, $nextPageToken)  =  $self->fetchData( $post_data );
   return ({ referenceSets => $referenceSets,
             nextPageToken => $nextPageToken });
 
 }
 
+## GET entry point
 sub getReferenceSet {
 
   my $self = shift;
   my $id = shift;
 
-  my $data;
-  $data->{id} = $id;
-  my ($referenceSets, $pageToken) =  $self->fetchData( $data );
+  my $data = { id => $id};
+
+  my ($referenceSets, $nextPageToken) =  $self->fetchData( $data );
 
   $self->context()->go( 'ReturnError', 'custom', ["ERROR: no data for ReferenceSet $id"])
     unless defined $referenceSets &&  ref($referenceSets) eq 'ARRAY' ;
@@ -63,15 +63,16 @@ sub getReferenceSet {
 
 
 ## send both post & get here as few sets to check
-
 sub fetchData{
 
-  my ($self,  $data ) = @_; 
+  my $self  = shift;
+  my $data  = shift;
 
   my $c = $self->context();
 
   ## read config
-  my $referenceSets = $self->read_config();
+  my $config = $self->context->model('ga4gh::ga4gh_utils')->read_sequence_config();
+  my $referenceSets =  $config->{referenceSets};
   my $nextPageToken;
 
   ## return empty array if no sets available by this id (behaviour not fully specified)
@@ -101,11 +102,13 @@ sub fetchData{
                                          &&  $data->{assemblyId}  ne $refset_hash->{id};
 
 
+    ## paging - only return requested page size
     if (defined $data->{pageSize} && $data->{pageSize} ne '' && $count == $data->{pageSize}){
       $nextPageToken = $n;
       last;
     }
 
+    ## format
     my $referenceSet;
     $referenceSet->{id}           = $refset_hash->{id};
     $referenceSet->{name}         = $refset_hash->{name};
@@ -120,70 +123,11 @@ sub fetchData{
     push @referenceSets, $referenceSet;
 
     $count++;
+  
   }
 
-  return (\@referenceSets, $nextPageToken);
+  return ( \@referenceSets, $nextPageToken );
 
 }
-
-
-##read config from JSON file
-
-sub read_config{
-
-  my $self = shift;
-
-  open IN, $self->{ga_reference_config} ||
-    $self->context()->go( 'ReturnError', 'custom', ["ERROR: Could not read from config file $self->{ga_reference_config}"]);
-  local $/ = undef;
-  my $json_string = <IN>;
-  close IN;
-
-
-  my $config = JSON->new->decode($json_string) ||
-    $self->context()->go( 'ReturnError', 'custom', ["ERROR: Failed to parse config file $self->{ga_reference_config}"]);
-
-  $self->context()->go( 'ReturnError', 'custom', [ " No data available " ] )
-    unless $config->{referenceSets} && scalar @{$config->{referenceSets}};
-
-  return $config->{referenceSets};
-}
-
-
-=head don't take from db as compliance data is fake 
-
-  my $core_ad = $c->model('Registry')->get_DBAdaptor($species, 'Core',    );
-  my $cmeta_ext_sth = $core_ad->dbc->db_handle->prepare(qq[ select meta_key, meta_value from meta]);
-  $cmeta_ext_sth->execute();
-  my $core_meta = $cmeta_ext_sth->fetchall_arrayref();
-
-  my %meta;
-  foreach my $l(@{$core_meta}){
-    $meta{$l->[0]} = $l->[1];
-  }
-
-  ## exit if not current
-  $self->context()->go( 'ReturnError', 'custom', [ " No data available for this reference set: $get_id" ] )
-    if defined $get_id &&  $get_id !~/$meta{"assembly.name"}/i;
-
-  my $referenceSet;
-  $referenceSet->{id}           = $meta{"assembly.name"};
-  $referenceSet->{referenceIds} = [];
-  $referenceSet->{md5checksum}  = 'md5';
-  $referenceSet->{ncbiTaxonId}  = $meta{"species.alias"};
-  $referenceSet->{description}  = $meta{"assembly.longname"};
-  $referenceSet->{assemblyId}   = $meta{"assembly.name"};
-  $referenceSet->{sourceURI}    = 'ftp://ftp.ensembl.org/pub/release-80/fasta/homo_sapiens/dna/';  ##FIX!
-  $referenceSet->{sourceAccessions} =[ $meta{"assembly.accession"}];
-  $referenceSet->{isDerived}    = 'true';
-
-
-  return { referenceSets => [$referenceSet]};
-
-}
-=cut
-
-
-
 
 1;

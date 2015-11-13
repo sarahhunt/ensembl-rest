@@ -14,11 +14,15 @@ limitations under the License.
 package EnsEMBL::REST::Model::ga4gh::references;
 
 use Moose;
+
 extends 'Catalyst::Model';
 use Data::Dumper;
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
+
+use EnsEMBL::REST::Model::ga4gh::ga4gh_utils;
+
 
 our $species = 'homo_sapiens';
 
@@ -28,14 +32,12 @@ sub build_per_context_instance {
 }
 
 
-## POST
+## handle POST requests
 sub fetch_references {
   
   my $self = shift;
 
-  my $post_data = $self->context()->req->data;
-
-  my ($references, $nextPageToken) = $self->extract_data($post_data);
+  my ($references, $nextPageToken) = $self->extract_data( $self->context()->req->data() );
 
   return ({ references    => $references, 
             nextPageToken => $nextPageToken});
@@ -45,16 +47,16 @@ sub fetch_references {
 ### GET single reference by 'id'
 sub getReference{
 
-  my ($self,  $get_id ) = @_;
+  my ($self, $get_id ) = @_;
 
-  my ($reference, $assemblId) = $self->get_sequences($get_id);
+  my ($reference, $assemblId) = $self->get_sequence($get_id);
 
   $self->context()->go( 'ReturnError', 'custom', ["ERROR: no data for $get_id"])
     unless defined $reference &&  ref($reference) eq 'HASH' ; 
-  my $formatted_reference = $self->format_sequence($reference, $assemblId);
-  return $formatted_reference;
 
+  return $self->format_sequence($reference, $assemblId);
 }
+
 
 ## fetch a sequence set & handle filters/paging 
 sub extract_data{
@@ -64,18 +66,19 @@ sub extract_data{
 
   my @references;
   my $count = 0;
-  my $nextToken;
+  my $nextPageToken;
+
+  ## paging - set the default page token to 0 unless one is specified
   $post_data->{pageToken} = 0 unless defined $post_data->{pageToken} && $post_data->{pageToken} ne '';
 
-  ## look up ensembl version for ftp
+  ## look up ensembl version for the ftp site attribute
   my $ens_version = $self->get_ensembl_version();
 
-
-  ## read config to get look up from seq name to MD5
+  ## read config and get look up from seq name to MD5
   my $refSeqSet = $self->get_sequenceset($post_data->{referenceSetId});
 
   ## return empty array if no sequences for this set (behaviour not fully specified)
-  return ( [], $nextToken) unless defined $refSeqSet &&  ref($refSeqSet) eq 'HASH' ;
+  return ( [], $nextPageToken) unless defined $refSeqSet &&  ref($refSeqSet) eq 'HASH' ;
 
   ## loop through available sequences
   foreach (my $n = $post_data->{pageToken}; $n < scalar(@{$refSeqSet->{sequences}} ); $n++){
@@ -85,13 +88,14 @@ sub extract_data{
     ## filter by any supplied attributes 
     next if defined $post_data->{md5checksum} && $post_data->{md5checksum} ne '' 
                                               && $post_data->{md5checksum} ne $refseq->{md5};
+
     next if defined $post_data->{accession}   && $post_data->{accession}   ne ''
                                               && $post_data->{accession}   ne $refseq->{sourceAccessions}->[0]; 
 
     ## rough paging
     $count++;
     if (defined $post_data->{pageSize} &&  $post_data->{pageSize} ne '' && $count > $post_data->{pageSize}){
-      $nextToken = $n;
+      $nextPageToken = $n;
       last;
     }
 
@@ -99,8 +103,7 @@ sub extract_data{
     push @references,  $ref;
   }
 
-
-  return (\@references, $nextToken ) ;
+  return (\@references, $nextPageToken ) ;
 
 }
 
@@ -121,7 +124,7 @@ sub format_sequence{
   $ref{isPrimary}        = $seq->{isPrimary};
 
   $ref{ncbiTaxonId}      = 9609; 
-  $ref{isDerived}        = 'true'; ##ambiguity codes to Ns
+  $ref{isDerived}        = 'true'; ##ambiguity codes have been changed to Ns
   $ref{sourceDivergence} = '';
 
 
@@ -130,13 +133,13 @@ sub format_sequence{
      $ref{sourceURI} = "https://github.com/ga4gh/compliance/blob/master/test-data/";
   }
   else{
-    $ens_ver  = 75 if $assembly =~/GRCh37/; 
+    $ens_ver  = 75         if $assembly =~/GRCh37/; 
     $assembly =~ s/\.p13// if $assembly =~/GRCh37/;
 
     $ref{sourceURI} =  'ftp://ftp.ensembl.org/pub/release-'. $ens_ver .'/fasta/homo_sapiens/dna/Homo_sapiens.'. $assembly.'.dna.chromosome.' . $ref{name} . '.fa.gz'; 
   }
-  return \%ref;
 
+  return \%ref;
 }
 
 sub get_ensembl_version{
@@ -151,18 +154,20 @@ sub get_ensembl_version{
 }
 
 ## extract specific reference sequence from config data
-sub get_sequences{
+sub get_sequence{
 
   my $self = shift;
   my $id   = shift;
 
-  my $config = $self->read_config();
+  my $config = $self->context->model('ga4gh::ga4gh_utils')->read_sequence_config();
+
 
   foreach my $referenceSet (@{$config->{referenceSets}}){
     foreach my $seq (@{$referenceSet->{sequences}}){
       return ($seq, $referenceSet->{id}) if $seq->{md5} eq $id;
     } 
   }
+  return undef;
 }
 
 ## extract specific reference set from config data
@@ -171,32 +176,12 @@ sub get_sequenceset{
   my $self = shift;
   my $set  = shift;
 
-  my $config = $self->read_config();
+  my $config = $self->context->model('ga4gh::ga4gh_utils')->read_sequence_config();
 
   foreach my $referenceSet (@{$config->{referenceSets}}){
     return $referenceSet if $referenceSet->{id} eq $set;
   }
+  return undef;
 }
-
-##read config from JSON file to get seq data grouped by set
-sub read_config{
-
-  my $self = shift;
-
-  open IN, $self->{ga_reference_config} ||
-    $self->context()->go( 'ReturnError', 'custom', ["ERROR: Could not read from config file $self->{ga_reference_config}"]);
-  local $/ = undef;
-  my $json_string = <IN>;
-  close IN;
-
-  my $config = JSON->new->decode($json_string) ||
-    $self->context()->go( 'ReturnError', 'custom', ["ERROR: Failed to parse config file $self->{ga_reference_config}"]);
-
-  $self->context()->go( 'ReturnError', 'custom', [ " No data available " ] )
-    unless $config->{referenceSets} && scalar @{$config->{referenceSets}};
-
-  return $config;
-}
-
 
 1;
