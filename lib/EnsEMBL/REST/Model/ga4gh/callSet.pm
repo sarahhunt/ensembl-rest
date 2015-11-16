@@ -84,7 +84,7 @@ sub fetch_batch{
   my $count_ind = 0; ## for batch size & paging
 
   my $vcf_collection = $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($data->{variantSetId});
-  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId ", $data->{variantSetId}])
     unless defined $vcf_collection; 
 
   $vcf_collection->use_db(0);
