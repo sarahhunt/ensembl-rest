@@ -50,9 +50,6 @@ sub fetch_annotationSet {
 #  my $version = $var_meta->schema_version();
 
   my $annotationSet;
-  $annotationSet->{analysis} =  { 'name'        => 'Ensembl',
-                                  'created'    =>  'timestamp'};
-
 
   ## variation required sources
   my $source_ad = $c->model('Registry')->get_adaptor($species, 'variation', 'Source');
@@ -73,6 +70,11 @@ sub fetch_annotationSet {
     $meta{$l->[0]} = $l->[1] if defined $l->[1];
   }
 
+  $annotationSet->{analysis} =  { 'name'        => 'Ensembl',
+                                  'created'    =>   $meta{"tv.timestamp"}
+                                  };
+
+  ## Incl. Var Set name
   $annotationSet->{id} = 'Ensembl_' . $meta{schema_version};
   $annotationSet->{analysis}->{info}->{Ensembl_version}  = $meta{schema_version};
 
