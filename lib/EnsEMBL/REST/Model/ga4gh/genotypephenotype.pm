@@ -139,7 +139,7 @@ sub fetch_by_phenotype{
 }
 
 ## currently only recommending PMID look up 
-## move to pheo feat attrib?? -  would work for ClinVar too
+## move to pheno feat attrib?? -  would work for ClinVar too
 ## VERY SLOW
 sub fetch_by_evidence{
 
@@ -154,10 +154,10 @@ sub fetch_by_evidence{
 
   foreach my $pmid (@{$data->{evidence}}){
 
-    my $studies = $sta->fetch_all_by_external_reference( "$pmid" );
-
+    my $studies = $sta->fetch_all_by_external_reference( $pmid );
+print Dumper $studies;
     unless ( defined $studies->[0] ){
-      warn "No study found for PMID:$pmid\n";
+      warn "No study found for $pmid\n";
       next;
     }
 
