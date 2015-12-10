@@ -209,26 +209,36 @@ sub format_results{
     my $ext_ref = $pf->study->external_reference() 
       if defined $pf->study() && defined $pf->study->external_reference(); 
 
-    push @{$assoc->{evidence}}, { evidenceType => "http://purl.obolibrary.org/obo/IAO_0000311",
+    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => 'IAO',
+                                                    ontologySourceID    => "http://purl.obolibrary.org/obo/IAO_0000311",
+                                                    ontologySourceVersion => undef},
                                   description  => $ext_ref 
                                 }    if defined $ext_ref && $ext_ref =~/PMID/;
 
-    push @{$assoc->{evidence}}, { evidenceType => "http://purl.obolibrary.org/obo/OBI_0001442", 
+    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => 'OBI',
+                                                    ontologySourceID    => "http://purl.obolibrary.org/obo/OBI_0001442",
+                                                    ontologySourceVersion => undef},
                                   description  => $pf->p_value()
                                 }    if defined $pf->p_value(); 
 
-    push @{$assoc->{evidence}}, { evidenceType => "http://purl.obolibrary.org/obo/OBCS_0000085",
+
+    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => 'OBCS',
+                                                    ontologySourceID    => "http://purl.obolibrary.org/obo/OBCS_0000085",
+                                                    ontologySourceVersion => undef},
                                   description  => $pf->beta_coefficient()
                                 }    if defined $pf->beta_coefficient();
 
-    push @{$assoc->{evidence}}, { evidenceType => "http://purl.obolibrary.org/obo/OBCS_0000054",
+    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => 'OBCS',
+                                                    ontologySourceID    => "http://purl.obolibrary.org/obo/OBCS_0000054",
+                                                    ontologySourceVersion => undef},
                                   description  => $pf->odds_ratio()
                                 }    if defined $pf->odds_ratio();
 
-    push @{$assoc->{evidence}}, { evidenceType => "URI for risk/associated allele needed",
+    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => undef,
+                                                    ontologySourceID    => "? risk allele",
+                                                    ontologySourceVersion => undef},
                                   description  => $pf->risk_allele()
                                  }   if defined $pf->risk_allele();
-
 
 
 
