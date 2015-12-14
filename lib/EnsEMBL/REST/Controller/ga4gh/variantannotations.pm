@@ -71,8 +71,8 @@ sub searchVariantAnnotations_POST {
        $post_data->{start} >= $post_data->{end};
 
 
-  $c->go( 'ReturnError', 'custom', [ ' Cannot find "annotationSetId" key in your request'])
-    unless exists $post_data->{annotationSetId};
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "variantAnnotationSetId" key in your request'])
+    unless exists $post_data->{variantAnnotationSetId};
 
 
   ## set a default page size if not supplied or not a number
