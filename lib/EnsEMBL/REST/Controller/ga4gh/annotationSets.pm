@@ -30,9 +30,9 @@ EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 
 =pod
 
-POST requests : /ga4gh/annotationsets/search -d
+POST requests : /ga4gh/variantannotationsets/search -d
 
-GET requests: /ga4gh/annotationsets/ensembl79
+GET requests: /ga4gh/variantannotationsets/ensembl79
 
 =cut
 
@@ -55,13 +55,13 @@ sub searchAnnotationSets_POST {
 
 }
 
-sub searchAnnotationSets: Chained('/') PathPart('ga4gh/annotationsets/search') ActionClass('REST')  {}
+sub searchAnnotationSets: Chained('/') PathPart('ga4gh/variantannotationsets/search') ActionClass('REST')  {}
 
 
 ## get method
 ## create subsets?
 ## not too useful without access to archive
-sub id: Chained('/') PathPart('ga4gh/annotationsets') ActionClass('REST') {}
+sub id: Chained('/') PathPart('ga4gh/variantannotationsets') ActionClass('REST') {}
 
 sub id_GET {
   my ($self, $c, $id) = @_;
