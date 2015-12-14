@@ -106,12 +106,13 @@ sub fetch_sets{
     my $variantSet;
 
     ## get info descriptions from one of the VCF files    
-    my $meta = $self->get_info($vc_ob->{$varset_id});
+    my $meta = [];
+    $meta = $self->get_info($vc_ob->{$varset_id}) unless $varset_id eq 11; ## hack for compliance data
 
     ## store
     $variantSet->{id}             = $varset_id;
-    $variantSet->{datasetId}      = $datasetId; 
-    $variantSet->{metadata}       = \@{$meta};
+    $variantSet->{datasetId}      = $datasetId;     
+    $variantSet->{metadata}       = $meta ;
     $variantSet->{referenceSetId} = $vc_ob->{$varset_id}->assembly();
     $variantSet->{name}           = $vc_ob->{$varset_id}->source_name() . ":" . $vc_ob->{$varset_id}->assembly();
     push @varsets, $variantSet;
