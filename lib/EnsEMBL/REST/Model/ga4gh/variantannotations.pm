@@ -47,19 +47,31 @@ sub build_per_context_instance {
 }
 
 sub searchVariantAnnotations {
+ 
+  my ($self, $data ) = @_;
+
+  ## format look up lists if any specified
+  $data->{required_features} = $self->extractRequired( $data->{feature_ids}, 'features') if $data->{feature_ids}->[0];
+  $data->{required_effects}  = $self->extractRequired( $data->{effects}, 'SO' )          if $data->{effects}->[0];
+
+  if ( $data->{variantAnnotationSetId} =~/compliance/){
+    return $self->searchVariantAnnotations_compliance($data);
+  }
+  else{
+     return $self->searchVariantAnnotations_database($data);
+  }
+}
+
+sub searchVariantAnnotations_database {
 
   my ($self, $data ) = @_;
 
   ## temp set id
   $data->{current_set} = $self->getSet();
 
-  $self->context->go('ReturnError', 'custom', [" No annotations available for this set: " . $data->{annotationSetId} ])
-    if defined $data->{annotationSetId}  && $data->{annotationSetId} ne $data->{current_set} && $data->{annotationSetId} ne 'Ensembl'; 
+  $self->context->go('ReturnError', 'custom', [" No annotations available for this set: " . $data->{variantAnnotationSetId} ])
+    if defined $data->{variantAnnotationSetId}  && $data->{variantAnnotationSetId} ne $data->{current_set} && $data->{variantAnnotationSetId} ne 'Ensembl'; 
 
-  ## format look up lists if any specified
-  $data->{required_features} = $self->extractRequired( $data->{feature_ids}, 'features') if $data->{feature_ids}->[0];
-  $data->{required_effects}  = $self->extractRequired( $data->{effects}, 'SO' )          if $data->{effects}->[0];
-  #print "Input: "; print Dumper $data;
 
   ## loop over features if supplied
   return $self->searchVariantAnnotations_by_features( $data)
@@ -158,7 +170,7 @@ sub searchVariantAnnotations_by_features {
 
       $running_total++;
       $var_ann->{variantId} = $tv->variation_feature->variation_name();
-      $var_ann->{annotationSetId} = $data->{current_set};
+      $var_ann->{variantAnnotationSetId} = $data->{current_set};
       $var_ann->{created} = 'FIXME_release_date';
 
       ## add co-located
@@ -422,7 +434,7 @@ sub extractRequired{
   my $req_hash;
 
   foreach my $required ( @{$req_list} ){
-    $req_hash->{$required}         = 1 if $type eq 'feature';
+    $req_hash->{$required}         = 1 if $type eq 'features';
     $req_hash->{$required->{name}} = 1 if $type eq 'SO';
   }
   return $req_hash;
@@ -469,5 +481,145 @@ sub getColocated{
   return \@colocatedNames;
 }
 
+sub searchVariantAnnotations_compliance{
+
+  my $self = shift;
+  my $data = shift;
+
+  my $variantSetId = (split/\:/,  $data->{variantAnnotationSetId})[1];
+ 
+  ##VCF collection object for the compliance annotation set
+  $data->{vcf_collection} =  $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id( $variantSetId );
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
+    unless defined $data->{vcf_collection}; 
+
+  ## look up filename from vcf collection object
+  my $file  =  $data->{vcf_collection}->filename_template();
+
+  $file =~ s/\#\#\#CHR\#\#\#/$data->{referenceName}/;
+
+  # return these ordered by position for simple pagination
+  my @var_ann;
+  my $nextPageToken;
+  $data->{pageToken} = $data->{start} unless defined $data->{pageToken}  && $data->{pageToken}  =~/\d+/;
+
+  ## exits here if unsupported chromosome requested
+  return (\@var_ann, $nextPageToken) unless -e $file;
+ 
+  my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $file ) || die "Failed to get parser : $!\n";
+
+  ## find column headers
+  my $meta = $parser->get_metadata_by_pragma("INFO");
+  my @headers;
+
+  foreach my $m(@{$meta}){
+    next unless $m->{Description} =~/Functional annotations/;
+    my $headers = (split/\'/, $m->{Description})[1]; 
+    @headers = split/\|/, $headers;
+  }
+
+  $parser->seek($data->{referenceName}, $data->{pageToken}, $data->{end});
+
+  my $n = 0;
+
+  while($n < ($data->{pageSize} + 1)){
+
+    my $got_something = $parser->next();
+    last if $got_something ==0;
+
+    my $name = $parser->get_IDs->[0];
+
+    if ($n == $data->{pageSize} ){
+      ## batch complete 
+      ## save next position for new page token
+      $nextPageToken = $parser->get_raw_start -1;
+      last;
+    }
+
+    $n++;
+    my $variation_hash;
+    $name = $parser->get_seqname ."_". $parser->get_raw_start if $name eq "." ; ## create placeholder name 
+    $variation_hash->{id}                      = $data->{variantAnnotationSetId} .":". $variantSetId .":".$name; 
+    $variation_hash->{variantAnnotationSetId}  = $data->{variantAnnotationSetId};
+    $variation_hash->{variantId}               = $variantSetId .":".$name;
+
+    $variation_hash->{created}                 = $data->{vcf_collection}->created || undef;
+    $variation_hash->{updated}                 = $data->{vcf_collection}->updated || undef; 
+
+
+    ## format array of transcriptEffects
+    my $var_info = $parser->get_info();
+
+    my @effects = split/\,/, $var_info->{ANN};
+    foreach my $effect (@effects){
+
+      my @annot = split/\|/, $effect;
+      my %annotation;
+
+      for (my $an =0; $an < scalar @annot; $an++ ){
+        ## add filter for feature name if required
+        $headers[$an] =~ s/^\s+|\s+$//g;
+        $annotation{$headers[$an]} = $annot[$an] if defined $annot[$an];
+      }
+
+      ## check if a feature list was specified that this feature is required
+      next if scalar @{$data->{feature_ids}}>0 && !exists $data->{required_features}->{ $annotation{Feature_ID} } ;
+
+      my ($cdna_pos, $cdna_length ) = split /\//, $annotation{"cDNA.pos / cDNA.length"} 
+        if defined $annotation{"cDNA.pos / cDNA.length"}; 
+
+      my ($cds_pos, $cds_length )   = split /\//, $annotation{"CDS.pos / CDS.length"}
+        if defined $annotation{"CDS.pos / CDS.length"} ;
+
+      my ($aa_pos, $aa_length )     = split /\//, $annotation{"AA.pos / AA.length"}
+        if defined $annotation{"AA.pos / AA.length"};
+
+      my $transcriptEffect = { id              => "placeholder",
+                               featureId       => $annotation{Feature_ID},
+                               alternateBases  => $annotation{Allele},
+                               impact          => $annotation{Annotation_Impact},
+                               effects         => [{ id             => 'PLACEHOLDER',
+                                                    name           => $annotation{Annotation},
+                                                    ontologySource => 'Sequence Ontology'
+                                                  }], 
+                               HGVSg           => $annotation{"HGVS.g"} || undef,
+                               HGVSc           => $annotation{"HGVS.c"} || undef,
+                               HGVSp           => $annotation{"HGVS.p"} || undef,
+                               cDNALocation    => {},
+                               CDSLocation     => {},
+                               proteinLocation => {},
+                               analysisResults => []
+                             };
+
+
+    $transcriptEffect->{cDNALocation} = { overlapStart      => $cdna_pos -1,
+                                          overlapEnd        => undef,
+                                          referenceSequence => undef,
+                                          alternateSequence => undef,
+                                        } if defined $cdna_pos;
+
+    $transcriptEffect->{CDSLocation}   = { overlapStart      => $cds_pos -1 ,
+                                           overlapEnd        => undef,
+                                           referenceSequence => undef,
+                                           alternateSequence => undef,
+                                         } if defined $cds_pos ;
+
+    $transcriptEffect->{proteinLocation} =  { overlapStart      => $aa_pos -1,
+                                              overlapEnd        => undef,
+                                              referenceSequence => undef,
+                                              alternateSequence => undef,
+                                             } if defined $aa_pos;
+
+      push @{$variation_hash->{transcriptEffects}}, $transcriptEffect;
+    } 
+
+    push @var_ann, $variation_hash if exists $variation_hash->{transcriptEffects}->[0];
+  }
+
+  $parser->close();
+
+  return ( {"variantAnnotations"  => \@var_ann,
+            "nextPageToken"       => $nextPageToken });
+}
 
 1;
