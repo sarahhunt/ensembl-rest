@@ -39,28 +39,34 @@ sub build_per_context_instance {
 sub fetch_annotationSet {
   
   my $self   = shift;
+  my $data   = shift;
+
+
+  if(defined $data->{variantSetId} &&  $data->{variantSetId} eq 11 || $data->{variantSetId} eq 10){
+    ## hack to take from compliance files
+    return $self->fetch_compliance_set();
+  }
+  else{
+    return $self->fetch_database_set($data);  
+  }
+}
+
+## limit to current ensembl release initially
+## set id is release id initially
+sub fetch_database_set {
+
+  my $self   = shift;
+  my $data   = shift;
 
   my $c = $self->context();
-  
+
   my $core_ad = $c->model('Registry')->get_DBAdaptor($species, 'Core',    );
   my $var_ad  = $c->model('Registry')->get_DBAdaptor($species, 'variation');
 
 
-#  my $var_meta = $var_ad->get_MetaContainer();
-#  my $version = $var_meta->schema_version();
-
   my $annotationSet;
 
-  ## variation required sources
-  my $source_ad = $c->model('Registry')->get_adaptor($species, 'variation', 'Source');
-  foreach my $name (qw[ dbSNP ClinVar]){
-    my $source   = $source_ad->fetch_by_name($name);
-    next unless defined $source;
-    $annotationSet->{analysis}->{info}->{ $name . "_version" } = $source->version(); 
-  }
-
-
-  ## variation required meta
+  ## extract required meta data from variation database
   my $meta_ext_sth = $var_ad->dbc->db_handle->prepare(qq[ select meta_key, meta_value from meta]);
   $meta_ext_sth->execute();
   my $stuff = $meta_ext_sth->fetchall_arrayref();
@@ -70,20 +76,32 @@ sub fetch_annotationSet {
     $meta{$l->[0]} = $l->[1] if defined $l->[1];
   }
 
+  ## bail unless current release requested for now
+  return  { variantAnnotationSets => []} if defined $data->{variantSetId} && $data->{variantSetId} ne $meta{schema_version};
+
+  $annotationSet->{variantSetId} = $meta{schema_version};
+  $annotationSet->{id}           = 'Ensembl:' . $meta{schema_version};
+
+  ## create analysis record
+  $annotationSet->{analysis}->{info}->{Ensembl_version}  = $meta{schema_version};
+
   $annotationSet->{analysis} =  { 'name'        => 'Ensembl',
                                   'created'    =>   $meta{"tv.timestamp"}
                                   };
-
-  ## Incl. Var Set name
-  $annotationSet->{id} = 'Ensembl_' . $meta{schema_version};
-  $annotationSet->{analysis}->{info}->{Ensembl_version}  = $meta{schema_version};
 
   foreach my $v_attrib (qw [polyphen_version sift_version sift_protein_db 1000genomes_version ]){
      $annotationSet->{analysis}->{info}->{$v_attrib} = $meta{$v_attrib} if defined  $meta{$v_attrib};
   }
 
+  ## extract required source versions from variation db
+  my $source_ad = $c->model('Registry')->get_adaptor($species, 'variation', 'Source');
+  foreach my $name (qw[ dbSNP ClinVar]){
+    my $source   = $source_ad->fetch_by_name($name);
+    next unless defined $source;
+    $annotationSet->{analysis}->{info}->{ $name . "_version" } = $source->version();
+  }
 
-  ## core required meta
+  ## extract required meta data from core db
   my $cmeta_ext_sth = $core_ad->dbc->db_handle->prepare(qq[ select meta_key, meta_value from meta]);
   $cmeta_ext_sth->execute();
   my $core_meta = $cmeta_ext_sth->fetchall_arrayref();
@@ -97,7 +115,7 @@ sub fetch_annotationSet {
      $annotationSet->{analysis}->{info}->{$c_attrib} = $cmeta{$c_attrib} if defined  $cmeta{$c_attrib};
   }
 
-  return { annotationSets => [$annotationSet]}; 
+  return { variantAnnotationSets => [$annotationSet]}; 
 
 }
 
@@ -122,5 +140,34 @@ sub getAnnotationSet{
 
 }
 
+sub fetch_compliance_set{
 
-1;
+  my $self = shift;
+  my $data = shift;
+
+  ##VCF collection object for the required set
+#  $data->{vcf_collection} =  $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($data->{variantSetId});
+#  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
+#    unless defined $data->{vcf_collection}; 
+
+
+  ## HC for now - 3 available for better testing later
+
+  my $annotationSet = { id            =>  'compliance:11',
+                        variantSetId  =>  11,
+                        analysis      => {  id          => 'SnpEff',
+                                            name        => 'SnpEff 4.2',
+                                            description => undef,
+                                            created     => undef,
+                                            updated     => undef,
+                                            type        => 'variant annotation',
+                                            software    =>['SnpEff'] }
+                      }; 
+
+
+  return { variantAnnotationSets => [$annotationSet],
+           nextPageToken         => undef  };
+
+
+
+}
