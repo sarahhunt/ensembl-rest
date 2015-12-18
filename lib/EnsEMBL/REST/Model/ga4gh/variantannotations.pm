@@ -51,7 +51,7 @@ sub searchVariantAnnotations {
   my ($self, $data ) = @_;
 
   ## format look up lists if any specified
-  $data->{required_features} = $self->extractRequired( $data->{feature_ids}, 'features') if $data->{feature_ids}->[0];
+  $data->{required_features} = $self->extractRequired( $data->{featureIds}, 'features') if $data->{featureIds}->[0];
   $data->{required_effects}  = $self->extractRequired( $data->{effects}, 'SO' )          if $data->{effects}->[0];
 
   if ( $data->{variantAnnotationSetId} =~/compliance/){
@@ -75,7 +75,7 @@ sub searchVariantAnnotations_database {
 
   ## loop over features if supplied
   return $self->searchVariantAnnotations_by_features( $data)
-    if exists $data->{feature_ids}->[0];
+    if exists $data->{featureIds}->[0];
 
   ## search by region otherwise
   return $self->searchVariantAnnotations_by_region( $data)
@@ -114,7 +114,7 @@ sub searchVariantAnnotations_by_features {
 
   ## extract one transcripts worth at once for paging
   ## should records be merged where transcripts overlap??
-  foreach my $req_feat ( @{$data->{feature_ids}} ){
+  foreach my $req_feat ( @{$data->{featureIds}} ){
 #    print "Starting to look for feature $req_feat ok_trans is $ok_trans\n";
     $ok_trans = 1 if defined $current_trans && $req_feat eq $current_trans;
     next unless $ok_trans == 1;
@@ -296,7 +296,7 @@ sub fetchByVF{
   foreach my $tv (@{$tvs}){   
 
     ## check if a feature list was specified
-    next if scalar @{$data->{feature_ids}}>0 && !exists $data->{required_features}->{ $tv->transcript()->stable_id()} ; 
+    next if scalar @{$data->{featureIds}}>0 && !exists $data->{required_features}->{ $tv->transcript()->stable_id()} ; 
 
     my $tvas = $tv->get_all_alternate_TranscriptVariationAlleles();
     foreach my $tva(@{$tvas}) {
@@ -336,7 +336,7 @@ sub formatTVA{
   $ga_annotation->{HGVSc} = $tva->hgvs_transcript() || undef; 
   $ga_annotation->{HGVSp} = $tva->hgvs_protein()    || undef;
 
-  $ga_annotation->{feature_id} = $tv->transcript()->stable_id();
+  $ga_annotation->{featureId} = $tv->transcript()->stable_id();
   $ga_annotation->{id} = "id";
 
   ## get consequences & impact
@@ -563,7 +563,7 @@ sub searchVariantAnnotations_compliance{
       }
 
       ## check if a feature list was specified that this feature is required
-      next if scalar @{$data->{feature_ids}}>0 && !exists $data->{required_features}->{ $annotation{Feature_ID} } ;
+      next if scalar @{$data->{featureIds}}>0 && !exists $data->{required_features}->{ $annotation{Feature_ID} } ;
 
       my ($cdna_pos, $cdna_length ) = split /\//, $annotation{"cDNA.pos / cDNA.length"} 
         if defined $annotation{"cDNA.pos / cDNA.length"}; 
