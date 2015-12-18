@@ -43,8 +43,12 @@ sub fetch_annotationSet {
 
 
   if(defined $data->{variantSetId} &&  $data->{variantSetId} eq 11 || $data->{variantSetId} eq 10){
+
     ## hack to take from compliance files
-    return $self->fetch_compliance_set();
+    my $annotationSet =  $self->fetch_compliance_set();
+    return { variantAnnotationSets => [$annotationSet],
+             nextPageToken         => undef  };
+    
   }
   else{
     return $self->fetch_database_set($data);  
@@ -124,6 +128,8 @@ sub getAnnotationSet{
 
   my ($self, $id ) = @_; 
 
+  return $self->fetch_compliance_set() if $id =~/compliance:11/; ## hack for compliance suite
+
   my $c = $self->context();
   
   my $var_ad  = $c->model('Registry')->get_DBAdaptor($species, 'variation');
@@ -143,7 +149,6 @@ sub getAnnotationSet{
 sub fetch_compliance_set{
 
   my $self = shift;
-  my $data = shift;
 
   ##VCF collection object for the required set
 #  $data->{vcf_collection} =  $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($data->{variantSetId});
@@ -164,10 +169,6 @@ sub fetch_compliance_set{
                                             software    =>['SnpEff'] }
                       }; 
 
-
-  return { variantAnnotationSets => [$annotationSet],
-           nextPageToken         => undef  };
-
-
+  return $annotationSet;
 
 }
