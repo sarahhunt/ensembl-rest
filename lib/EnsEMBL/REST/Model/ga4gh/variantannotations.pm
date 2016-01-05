@@ -501,6 +501,8 @@ sub searchVariantAnnotations_compliance{
   # return these ordered by position for simple pagination
   my @var_ann;
   my $nextPageToken;
+  ## VCF is 1-based; GA4GH is 0-based & open-closed 
+  $data->{end}++;
   $data->{pageToken} = $data->{start} unless defined $data->{pageToken}  && $data->{pageToken}  =~/\d+/;
 
   ## exits here if unsupported chromosome requested
