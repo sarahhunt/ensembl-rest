@@ -194,6 +194,8 @@ sub get_next_by_token{
     last if $got_something ==0;
 
     my $name = $parser->get_IDs->[0];
+    ## create placeholder name if not supplied
+    $name = $parser->get_seqname ."_". $parser->get_raw_start if $name eq "." ;
 
     if ($n == $data->{pageSize} ){
       ## batch complete 
@@ -209,7 +211,7 @@ sub get_next_by_token{
     next if $name=~ /esv/; ##skip these for now
 
     ## format array of genotypes
-    my $genotype_calls = {};
+    my $genotype_calls = [];
     $genotype_calls = $self->sort_genotypes($parser, $data, $data->{vcf_collection}->{is_remapped})
       unless $data->{variantSetId} eq 11;  ## hack for compliance suite
 
@@ -288,6 +290,11 @@ sub getVariant{
   $vfa->db->include_failed_variations(0); ## don't extract multi-mapping variants
  
   my ($variantSetId, $variantId) = split/\:/, $id;
+
+   ## nameless compliance variants
+  if( $variantSetId ==11 ){
+    return $self->get_compliance_variant( $variantSetId, $variantId); 
+  }
 
   ## look up position in ensembl db 
   my $var = $va->fetch_by_name($variantId);
@@ -375,6 +382,40 @@ sub getSingleCallSets{
 
 }
 
+## nameless (fake?) variants not in the database
+## id is based on chrom and location
+## create private GA4GH database?
+sub get_compliance_variant{
+
+  my ($self, $variantSetId, $varname ) = @_;
+
+  return  unless $variantSetId ==11;
+
+  ## create post style input structure
+  my $data;
+  my ($chr, $pos) = split/\_/, $varname ;
+  $data->{start} = $pos - 1;
+  $data->{end }  = $pos;
+  $data->{referenceName} = $chr;
+  $data->{variantSetId} = 11; 
+
+  ## load VCFcollections object for variantSet 
+  $data->{vcf_collection} = $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($data->{variantSetId});
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
+    unless defined $data->{vcf_collection};
+
+  ## create fake token -what should really be returned for get??
+  $data->{pageSize} = 1;
+  $data->{pageToken} = $data->{start};
+
+  my ($var_info, $next_ds) = $self->get_next_by_token($data);
+
+  ## exit if none found
+  $self->context()->go( 'ReturnError', 'custom', [ " No variants are available for this region" ] )
+     unless defined $var_info ;
+
+  return $var_info->[0];
+}
 
 
 sub numeric{
