@@ -52,7 +52,7 @@ sub fetch_variantSets {
   my ($variantSets, $newPageToken ) = $self->fetch_sets($data);
 
   my $ret = { variantSets => $variantSets};
-  $ret->{pageToken} = $newPageToken  if defined $newPageToken ;
+  $ret->{nextPageToken} = $newPageToken  if defined $newPageToken ;
 
   return $ret;
 }
