@@ -76,7 +76,7 @@ sub searchVariantAnnotations_POST {
 
 
   ## set a default page size if not supplied or not a number
-  $post_data->{pageSize} = 10 unless (defined  $post_data->{pageSize} &&
+  $post_data->{pageSize} = 50 unless (defined  $post_data->{pageSize} &&
                                       $post_data->{pageSize} =~ /\d+/ &&
                                       $post_data->{pageSize} >0  );
 
