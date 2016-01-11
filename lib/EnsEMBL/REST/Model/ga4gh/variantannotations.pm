@@ -174,8 +174,8 @@ sub searchVariantAnnotations_by_features {
       $var_ann->{created} = 'FIXME_release_date';
 
       ## add co-located
-      my $coLocated = $self->getColocated( $tv->variation_feature );
-      $var_ann->{coLocatedVariants} = $coLocated if exists $coLocated->[0];
+#      my $coLocated = $self->getColocated( $tv->variation_feature );
+#      $var_ann->{coLocatedVariants} = $coLocated if exists $coLocated->[0];
 
       if( defined $tv->variation_feature->minor_allele() ) {    
         $var_ann->{info}  = {  "1KG_minor_allele"           =>  $tv->variation_feature->minor_allele(),
@@ -332,9 +332,9 @@ sub formatTVA{
   $ga_annotation->{alternateBase}       = $tva->variation_feature_seq();
 
   ## do HGVS - only return if there is a value?
-  $ga_annotation->{HGVSg} = $tva->hgvs_genomic(); 
-  $ga_annotation->{HGVSc} = $tva->hgvs_transcript() || undef; 
-  $ga_annotation->{HGVSp} = $tva->hgvs_protein()    || undef;
+  $ga_annotation->{hgvsAnnotation}->{genomic} = $tva->hgvs_genomic(); 
+  $ga_annotation->{hgvsAnnotation}->{coding}  = $tva->hgvs_transcript() || undef; 
+  $ga_annotation->{hgvsAnnotation}->{protein} = $tva->hgvs_protein()    || undef;
 
   $ga_annotation->{featureId} = $tv->transcript()->stable_id();
   $ga_annotation->{id} = "id";
@@ -356,16 +356,16 @@ sub formatTVA{
 
   my $cdna_start = $tv->cdna_start();
   if( defined $cdna_start ){
-    $ga_annotation->{cDNALocation}->{overlapStart}   =   $cdna_start  - 2;
-    $ga_annotation->{cDNALocation}->{overlapEnd}     =   $tv->cdna_end() - 1;
+    $ga_annotation->{cDNALocation}->{start}   =   $cdna_start  - 2;
+    $ga_annotation->{cDNALocation}->{end}     =   $tv->cdna_end() - 1;
   }
  
   my $codon = $tva->codon() ;
   if( defined $codon ){
     $ga_annotation->{cdsLocation}->{referenceSequence} = $tv->get_reference_TranscriptVariationAllele->codon();
     $ga_annotation->{cdsLocation}->{alternateSequence} = $codon;
-    $ga_annotation->{cdsLocation}->{overlapStart}      = $tv->cds_start() -2;
-    $ga_annotation->{cdsLocation}->{overlapEnd}        = $tv->cds_end() -1;
+    $ga_annotation->{cdsLocation}->{start}      = $tv->cds_start() -2;
+    $ga_annotation->{cdsLocation}->{end}        = $tv->cds_end() -1;
   }
 
 
@@ -373,8 +373,8 @@ sub formatTVA{
   if( defined $peptide ){
     $ga_annotation->{proteinLocation}->{referenceSequence} = $tv->get_reference_TranscriptVariationAllele->peptide();
     $ga_annotation->{proteinLocation}->{alternateSequence} = $peptide;
-    $ga_annotation->{proteinLocation}->{overlapStart}      = $tv->translation_start()  - 2;
-    $ga_annotation->{proteinLocation}->{overlapEnd}        = $tv->translation_end()  -1;
+    $ga_annotation->{proteinLocation}->{start}      = $tv->translation_start()  - 2;
+    $ga_annotation->{proteinLocation}->{end}        = $tv->translation_end()  -1;
 
     ## Extract protein impact information for missense variants
     my $protein_impact = $self->protein_impact($tva); 
@@ -395,28 +395,22 @@ sub protein_impact{
   my @analysisResults;
 
   my $sift_analysis;
-  $sift_analysis->{analysisResult} = $tva->sift_prediction();
-  $sift_analysis->{analysisScore}  = $tva->sift_score();
+  $sift_analysis->{result} = $tva->sift_prediction();
+  $sift_analysis->{score}  = $tva->sift_score();
  
   if (defined $sift_analysis->{analysisResult}){
-    ## move to anotationset?  
-    $sift_analysis->{analysis}     = { id          => 'placeholder',
-                                       description => 'SIFT',
-                                       software    => 'SIFT.5.2.2',
-                                     };
+    ## TODO: define better id!
+    $sift_analysis->{analysisId}    = 'SIFT.5.2.2';
     push @analysisResults , $sift_analysis;
   }    
       
   my $polyphen_analysis;
-  $polyphen_analysis->{analysisResult} = $tva->polyphen_prediction();
-  $polyphen_analysis->{analysisScore}  = $tva->polyphen_score();
+  $polyphen_analysis->{result} = $tva->polyphen_prediction();
+  $polyphen_analysis->{score}  = $tva->polyphen_score();
 
   if (defined $polyphen_analysis->{analysisResult}){
-    $polyphen_analysis->{analysis}     = { id          => 'placeholder',
-                                           description => 'Polyphen',
-                                           software    => 'Polyphen.2.2.2_r405',
-                                          };
-                                               
+    ## TODO: define better id!
+    $polyphen_analysis->{analysisId}     = 'Polyphen.2.2.2_r405';
     push @analysisResults , $polyphen_analysis;
   }
 
@@ -490,7 +484,7 @@ sub searchVariantAnnotations_compliance{
  
   ##VCF collection object for the compliance annotation set
   $data->{vcf_collection} =  $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id( $variantSetId );
-  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantAnnotationSetId"])
     unless defined $data->{vcf_collection}; 
 
   ## look up filename from vcf collection object
@@ -584,9 +578,9 @@ sub searchVariantAnnotations_compliance{
                                                     name           => $annotation{Annotation},
                                                     ontologySource => 'Sequence Ontology'
                                                   }], 
-                               HGVSg           => $annotation{"HGVS.g"} || undef,
-                               HGVSc           => $annotation{"HGVS.c"} || undef,
-                               HGVSp           => $annotation{"HGVS.p"} || undef,
+                               hgvsAnnotation  => { genomic  => $annotation{"HGVS.g"} || undef,
+                                                    coding   => $annotation{"HGVS.c"} || undef,
+                                                    protein  => $annotation{"HGVS.p"} || undef },
                                cDNALocation    => {},
                                CDSLocation     => {},
                                proteinLocation => {},
@@ -594,20 +588,20 @@ sub searchVariantAnnotations_compliance{
                              };
 
 
-    $transcriptEffect->{cDNALocation} = { overlapStart      => $cdna_pos -1,
-                                          overlapEnd        => undef,
+    $transcriptEffect->{cDNALocation} = { start      => $cdna_pos -1,
+                                          end        => undef,
                                           referenceSequence => undef,
                                           alternateSequence => undef,
                                         } if defined $cdna_pos;
 
-    $transcriptEffect->{CDSLocation}   = { overlapStart      => $cds_pos -1 ,
-                                           overlapEnd        => undef,
+    $transcriptEffect->{CDSLocation}   = { start      => $cds_pos -1 ,
+                                           end        => undef,
                                            referenceSequence => undef,
                                            alternateSequence => undef,
                                          } if defined $cds_pos ;
 
-    $transcriptEffect->{proteinLocation} =  { overlapStart      => $aa_pos -1,
-                                              overlapEnd        => undef,
+    $transcriptEffect->{proteinLocation} =  { start      => $aa_pos -1,
+                                              end        => undef,
                                               referenceSequence => undef,
                                               alternateSequence => undef,
                                              } if defined $aa_pos;

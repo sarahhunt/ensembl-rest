@@ -84,8 +84,9 @@ sub fetch_database_set {
   return  { variantAnnotationSets => []} if defined $data->{variantSetId} && $data->{variantSetId} ne $meta{schema_version};
 
   $annotationSet->{variantSetId} = $meta{schema_version};
+  ## need better id
   $annotationSet->{id}           = 'Ensembl:' . $meta{schema_version};
-
+  $annotationSet->{name}         = 'Ensembl:' . $meta{schema_version};
   ## create analysis record
   $annotationSet->{analysis}->{info}->{Ensembl_version}  = $meta{schema_version};
 
@@ -158,7 +159,8 @@ sub fetch_compliance_set{
 
   ## HC for now - 3 available for better testing later
 
-  my $annotationSet = { id            =>  'compliance:11',
+  my $annotationSet = { id            => 'compliance:11',
+                        name          => 'compliance:11',
                         variantSetId  =>  11,
                         analysis      => {  id          => 'SnpEff',
                                             name        => 'SnpEff 4.2',
