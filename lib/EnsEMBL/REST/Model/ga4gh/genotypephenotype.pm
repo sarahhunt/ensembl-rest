@@ -63,7 +63,6 @@ sub fetch_g2p_results {
     $self->context()->go( 'ReturnError', 'custom', [ "Nothing to search on "]);
   }
 
-
   my ($assoc, $nextPageToken) = $self->format_results($results, $data->{pageSize} );
 
   return{ associations  => $assoc,
@@ -106,12 +105,12 @@ sub fetch_by_phenotype{
     $required{$uri} = 1;
   }
 
-  my %uri;  ##content: uri\tdesc
-  open my $temp_lookup, "/home/vagrant/src/ensembl-rest/gwas_uri_desc.txt " || die "Failed to file gwas_uri_desc.txt  for pheno URL :$!\n"; 
+  my %uri;  ##content: uri\tterm\tdesc
+  open my $temp_lookup, "/home/vagrant/src/ensembl-rest/gwas_uri_term_desc.txt " || die "Failed to file gwas_uri_desc.txt  for pheno URL :$!\n"; 
   while(<$temp_lookup>){
     chomp;
     my @a = split/\t/;
-    $uri{$a[1]} = $a[0] if $required{$a[0]} ; 
+    $uri{$a[2]}  = $a[0] if $required{$a[0]} ;
   }
 
   ## to database with descriptions
@@ -122,9 +121,9 @@ sub fetch_by_phenotype{
   my $count=0; ## only pass enough for page size - could be many
 
   foreach my $desc (sort keys %uri ){
-    warn "Looking for pheno : $desc\n";
-    my $pfs = $pfa->fetch_all_by_phenotype_description_source_name( $desc );
-  
+
+    my $pfs = $pfa->fetch_all_by_phenotype_description_source_name( $desc, 'NHGRI-EBI GWAS catalog' );
+
    foreach my $pf (@{$pfs}){
        last if defined $data->{pageSize} && $data->{pageSize}=~/\d+/ && $count== $data->{pageSize};
 
@@ -155,7 +154,7 @@ sub fetch_by_evidence{
   foreach my $pmid (@{$data->{evidence}}){
 
     my $studies = $sta->fetch_all_by_external_reference( $pmid );
-print Dumper $studies;
+
     unless ( defined $studies->[0] ){
       warn "No study found for $pmid\n";
       next;
@@ -188,7 +187,8 @@ sub format_results{
 
   my @assocs;
 
-  my $count;
+  my $count =0;
+
   foreach my $pf( @{$pfs} ){
 
     if (defined $pageSize &&  $pageSize eq $count){
@@ -209,38 +209,45 @@ sub format_results{
     my $ext_ref = $pf->study->external_reference() 
       if defined $pf->study() && defined $pf->study->external_reference(); 
 
-    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => 'IAO',
-                                                    ontologySourceID    => "http://purl.obolibrary.org/obo/IAO_0000311",
-                                                    ontologySourceVersion => undef},
+    my $attribs = $pf->get_all_attributes();
+
+    push @{$assoc->{evidence}}, { evidenceType => { sourceName    => 'IAO',
+                                                    id            => "http://purl.obolibrary.org/obo/IAO_0000311",
+                                                    term          => 'publication',
+                                                    sourceVersion => undef},
                                   description  => $ext_ref 
                                 }    if defined $ext_ref && $ext_ref =~/PMID/;
 
-    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => 'OBI',
-                                                    ontologySourceID    => "http://purl.obolibrary.org/obo/OBI_0001442",
-                                                    ontologySourceVersion => undef},
-                                  description  => $pf->p_value()
-                                }    if defined $pf->p_value(); 
+    push @{$assoc->{evidence}}, { evidenceType => { sourceName    => 'OBI',
+                                                    id            => "http://purl.obolibrary.org/obo/OBI_0000175",
+                                                    term          => 'p-value',
+                                                    sourceVersion => undef},
+                                  description  => $attribs->{p_value}
+                                }    if defined $attribs->{p_value}; 
 
 
-    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => 'OBCS',
-                                                    ontologySourceID    => "http://purl.obolibrary.org/obo/OBCS_0000085",
-                                                    ontologySourceVersion => undef},
-                                  description  => $pf->beta_coefficient()
-                                }    if defined $pf->beta_coefficient();
+    push @{$assoc->{evidence}}, { evidenceType => { sourceName    => 'OBCS',
+                                                    id            => "http://purl.obolibrary.org/obo/OBCS_0000085",
+                                                    term          => 'standardized coefficient',
+                                                    sourceVersion => undef},
+                                  description  => $attribs->{beta_coefficient}
+                                }    if defined $attribs->{beta_coefficient};
 
-    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => 'OBCS',
-                                                    ontologySourceID    => "http://purl.obolibrary.org/obo/OBCS_0000054",
-                                                    ontologySourceVersion => undef},
-                                  description  => $pf->odds_ratio()
-                                }    if defined $pf->odds_ratio();
-
-    push @{$assoc->{evidence}}, { evidenceType => { ontologySourceName  => undef,
-                                                    ontologySourceID    => "? risk allele",
-                                                    ontologySourceVersion => undef},
-                                  description  => $pf->risk_allele()
-                                 }   if defined $pf->risk_allele();
+    push @{$assoc->{evidence}}, { evidenceType => { sourceName  => 'OBCS',
+                                                    id          => "http://purl.obolibrary.org/obo/OBCS_0000054",
+                                                    term        => 'odds ratio',
+                                                    sourceVersion => undef},
+                                  description  => $attribs->{odds_ratio}
+                                }    if defined $attribs->{odds_ratio};
 
 
+    ### THIS ISN'T IN THE SCHEMA
+    $assoc->{info}  = {};
+    $assoc->{info}->{risk_allele}     = $attribs->{risk_allele}     if defined $attribs->{risk_allele};
+    $assoc->{info}->{associated_gene} = $attribs->{associated_gene} if defined $attribs->{associated_gene};
+
+    ## for DDG2P
+    $assoc->{info}->{inheritance_type} = $attribs->{inheritance_type}     if defined $attribs->{inheritance_type};    
 
     ## PhenotypeInstance record
     my $phenotype_id = $pf->phenotype()->dbID;
@@ -249,15 +256,26 @@ sub format_results{
     ## OntologyTerm record
     my $ensembl_pheno_desc = $pf->phenotype->description();
     my $lc_ensembl_pheno_desc = "\L$ensembl_pheno_desc";
-    print "No ontol term for $ensembl_pheno_desc\n" unless defined $ontol_info->{$lc_ensembl_pheno_desc};
+    print "No ontol term for $ensembl_pheno_desc\n" unless defined $ontol_info->{$lc_ensembl_pheno_desc}->{id};
  
-    my @a = split/\//, $ontol_info->{$lc_ensembl_pheno_desc};
+    my @a = split/\//, $ontol_info->{$lc_ensembl_pheno_desc}->{id};
     my $term = pop(@a);
     my $ontol_source = (split/\_/, $term)[0];
 
-    $assoc->{phenotype}->{type}->{ontologySourceName}    = $ontol_source;
-    $assoc->{phenotype}->{type}->{ontologySourceID}      = $ontol_info->{ $lc_ensembl_pheno_desc };
-    $assoc->{phenotype}->{type}->{ontologySourceVersion} = "";
+    $assoc->{phenotype}->{type}->{sourceName}    = $ontol_source;
+    $assoc->{phenotype}->{type}->{id}            = $ontol_info->{ $lc_ensembl_pheno_desc }->{id};
+    $assoc->{phenotype}->{type}->{term}          = $ontol_info->{ $lc_ensembl_pheno_desc }->{term};
+    $assoc->{phenotype}->{type}->{sourceVersion} = "";
+
+    ## hack to see how genes look
+    if( $pf->source_name =~/Orphanet/){
+      $assoc->{phenotype}->{type}->{sourceName}    = 'Orphanet';
+      $assoc->{phenotype}->{type}->{id}            = 'http://www.orpha.net/ORDO/Orphanet_' . $attribs->{external_id};
+      $assoc->{phenotype}->{type}->{term}          = $lc_ensembl_pheno_desc ;
+    }
+
+   ## bail if Phenotype Ontology term not available
+   next unless defined $assoc->{phenotype}->{type}->{id}  ;
 
     $assoc->{phenotype}->{qualifier}   = '';
     $assoc->{phenotype}->{ageOfOnset}  = '';
@@ -299,26 +317,37 @@ sub format_feature{
 }
 
 
-##temp hack
+##temp hack - sort db lookup
 sub feature_type{
 
   my $type = shift;
-  return {  source => "SO",
-            name   => "sequence_variant",
-            id     => "SO:0001060" } if $type =~/Variation/;
+
+  return {  sourceName     => "Sequence Ontology",
+            term           => "sequence_variant", 
+            sourceVersion  => "",
+            id             => "SO:0001060"
+         } if $type  eq 'Variation';
+
+  return {  sourceName     => "Sequence Ontology",
+            term           => "gene",                  
+            sourceVersion  => "",
+            id             => "SO:0000704"
+         } if $type eq 'Gene';
+
 }
 
-
+### FIX THIS
 ## temp - build lookup hash of ontology terms prior to database'ing
 sub read_ontology_file{
 
   my %ontol_info;
-  open my $lookup, "/home/vagrant/src/ensembl-rest/gwas_uri_desc.txt" || die "Failed to open temp_pheno_ontol.txt :$!\n";
+  open my $lookup, "/home/vagrant/src/ensembl-rest/gwas_uri_term_desc.txt" || die "Failed to open temp_pheno_ontol.txt :$!\n";
   while(<$lookup>){
     chomp;
 
-    my ( $ontol, $desc) = split/\t/; 
-    $ontol_info{"\L$desc"} = $ontol;
+    my ($id, $term, $desc) = split/\t/; 
+    $ontol_info{"\L$desc"}{id}   = $id;
+    $ontol_info{"\L$desc"}{term} = $term;
   }
 
   return \%ontol_info;
