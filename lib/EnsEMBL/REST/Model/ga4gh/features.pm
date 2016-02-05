@@ -218,26 +218,31 @@ sub formatTranscript{
   my $tr   = shift;
   my $data = shift;
 
-  my $gaFeature;
-  $gaFeature->{id}            = $tr->stable_id();
-  $gaFeature->{featureSetId}  = $data->{current_set};
+  my $gaFeature  = { id            => $tr->stable_id(),
+                     parentIds     => [],
+                     featureSetId  => $data->{current_set},
+                     referenceName => $tr->seq_region_name(),
+                     start         => $tr->seq_region_start() - 1,
+                     end           => $tr->seq_region_end(),
+                    };
 
-  my $segment;
-  ## FIX: check graph stuff
-  $segment->{start}->{base}->{referenceName} = $tr->seq_region_name();
-  $segment->{start}->{base}->{position}      = $tr->seq_region_start();
+##  graph stuff
+#  my $segment;
+#  $segment->{start}->{base}->{referenceName} = $tr->seq_region_name();
+#  $segment->{start}->{base}->{position}      = $tr->seq_region_start();
 #  $segment->{start}->{strand} #not needed?
-  $segment->{length}                         = $tr->seq_region_end() - $tr->seq_region_start();
+#  $segment->{length}                         = $tr->seq_region_end() - $tr->seq_region_start();
+#  push @{$gaFeature->{path}}, $segment;
 
-  push @{$gaFeature->{path}}, $segment;
 
   ## look up ontology info if non supplied
   $data->{ontol}->{transcript} = $self->fetchSO('transcript') 
     unless exists $data->{ontol}->{transcript};
 
-  $gaFeature->{featureType} = { id     =>  $data->{ontol}->{transcript}->{id},
-                                name   =>  $data->{ontol}->{transcript}->{name},
-                                source =>  $data->{ontol}->{transcript}->{source} };
+  $gaFeature->{featureType} = { id            =>  $data->{ontol}->{transcript}->{id},
+                                term          =>  $data->{ontol}->{transcript}->{name},
+                                sourceName    =>  $data->{ontol}->{transcript}->{source},
+                                sourceVersion => undef };
 
   ## what is interesting here?
   $gaFeature->{attributes} = { version => $tr->version(),
