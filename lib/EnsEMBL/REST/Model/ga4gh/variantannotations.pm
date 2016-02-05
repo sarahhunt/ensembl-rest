@@ -135,7 +135,7 @@ sub searchVariantAnnotations_by_features {
       foreach my $cons(@cons_terms){ $constraint .= "\"$cons\",";}
       $constraint =~ s/\,$/\)/;
       $constraint .= " and somatic = 1 ";
-#      print "Limiting effects for feature to : $constraint\n";
+
       $tvs = $tva->fetch_all_by_Transcripts_with_constraint([$transcript], $constraint );	
     }
     else{
@@ -162,7 +162,7 @@ sub searchVariantAnnotations_by_features {
       ## get consequences for each alt allele
       my $tvas = $tv->get_all_alternate_TranscriptVariationAlleles();
       foreach my $tva(@{$tvas}) {
-        my $ga_annotation  = $self->formatTVA( $tva, $tv ) ;
+        my $ga_annotation  = $self->formatTVA( $tva, $tv, $data->{required_effects} ) ;
         push @{$var_ann->{transcriptEffects}}, $ga_annotation if defined $ga_annotation->{impact};
       }
       ## don't count or store until TV available
@@ -244,7 +244,7 @@ sub extractVFbySlice{
     foreach my $cons(@cons_terms){ 
       $constraint .= "vf.consequence_types like \"%$cons\%\" and ";}
       $constraint =~ s/and $//;
-#    print "limiting over region with $constraint\n";
+
     $vfs = $vfa->fetch_all_by_Slice_constraint($slice, $constraint);
   }
   else{
@@ -301,10 +301,12 @@ sub fetchByVF{
     my $tvas = $tv->get_all_alternate_TranscriptVariationAlleles();
     foreach my $tva(@{$tvas}) {
 
-      my $ga_annotation  = $self->formatTVA( $tva, $tv ) ;
-      push @{$var_ann->{transcriptEffects}}, $ga_annotation;
+      my $ga_annotation  = $self->formatTVA( $tva, $tv, $data->{required_effects} ) ;
+      push @{$var_ann->{transcriptEffects}}, $ga_annotation if defined $ga_annotation;
     }
   }
+
+  return unless exists $var_ann->{transcriptEffects}->[0];
 
   ## add 1KG global MAF as illustrative info
   if( defined $vf->minor_allele() ) {
@@ -312,12 +314,15 @@ sub fetchByVF{
                            "1KG_minor_allele_frequency" =>  $vf->minor_allele_frequency()
                         };
   }
+  else{
+    $var_ann->{info}  ={};
+  }
 
   ## add co-located
-  my $coLocated = $self->getColocated( $vf );
-  $var_ann->{coLocatedVariants} = $coLocated if exists $coLocated->[0];
+#  my $coLocated = $self->getColocated( $vf );
+#  $var_ann->{coLocatedVariants} = $coLocated if exists $coLocated->[0];
 
-  return $var_ann if exists $var_ann->{transcriptEffects}->[0];
+  return $var_ann;
 }
 
 
@@ -326,25 +331,23 @@ sub formatTVA{
   my $self = shift;
   my $tva  = shift;
   my $tv   = shift;
+  my $effects = shift;
 
   my $ga_annotation;
 
-  $ga_annotation->{alternateBase}       = $tva->variation_feature_seq();
-
-  ## do HGVS - only return if there is a value?
-  $ga_annotation->{hgvsAnnotation}->{genomic} = $tva->hgvs_genomic(); 
-  $ga_annotation->{hgvsAnnotation}->{coding}  = $tva->hgvs_transcript() || undef; 
-  $ga_annotation->{hgvsAnnotation}->{protein} = $tva->hgvs_protein()    || undef;
-
-  $ga_annotation->{featureId} = $tv->transcript()->stable_id();
-  $ga_annotation->{id} = "id";
 
   ## get consequences & impact
   my $ocs = $tva->get_all_OverlapConsequences();
 
+  ## consequence filter
+  my $found_required = 1;
+  $found_required    = 0 if defined $effects;
+
   foreach my $oc(@{$ocs}) {
     my $term = $oc->SO_term();
     my $acc  = $oc->SO_accession();
+
+    $found_required = 1 if $effects->{$term};
     my $ontolTerm = { id             => $acc,
                       name           => $term,
                       ontologySource => 'Sequence Ontology'      
@@ -354,18 +357,34 @@ sub formatTVA{
     $ga_annotation->{impact} = $oc->impact() ;
   }
 
+  ## consequence filter
+  return undef unless $found_required == 1;
+
+  $ga_annotation->{alternateBase}       = $tva->variation_feature_seq();
+
+  ## do HGVS 
+  $ga_annotation->{hgvsAnnotation}->{genomic}    = $tva->hgvs_genomic();
+  $ga_annotation->{hgvsAnnotation}->{transcript} = $tva->hgvs_transcript() || undef;
+  $ga_annotation->{hgvsAnnotation}->{protein}    = $tva->hgvs_protein()    || undef;
+
+  $ga_annotation->{featureId} = $tv->transcript()->stable_id();
+  $ga_annotation->{id} = "id";
+
+
   my $cdna_start = $tv->cdna_start();
   if( defined $cdna_start ){
-    $ga_annotation->{cDNALocation}->{start}   =   $cdna_start  - 2;
-    $ga_annotation->{cDNALocation}->{end}     =   $tv->cdna_end() - 1;
+    $ga_annotation->{cDNALocation}->{referenceSequence} = undef;
+    $ga_annotation->{cDNALocation}->{alternateSequence} = $tva->variation_feature_seq();
+    $ga_annotation->{cDNALocation}->{start}   =   $cdna_start  - 1;
+    $ga_annotation->{cDNALocation}->{end}     =   $tv->cdna_end() ;
   }
  
   my $codon = $tva->codon() ;
   if( defined $codon ){
     $ga_annotation->{cdsLocation}->{referenceSequence} = $tv->get_reference_TranscriptVariationAllele->codon();
     $ga_annotation->{cdsLocation}->{alternateSequence} = $codon;
-    $ga_annotation->{cdsLocation}->{start}      = $tv->cds_start() -2;
-    $ga_annotation->{cdsLocation}->{end}        = $tv->cds_end() -1;
+    $ga_annotation->{cdsLocation}->{start}      = $tv->cds_start() -1;
+    $ga_annotation->{cdsLocation}->{end}        = $tv->cds_end() ;
   }
 
 
@@ -373,8 +392,8 @@ sub formatTVA{
   if( defined $peptide ){
     $ga_annotation->{proteinLocation}->{referenceSequence} = $tv->get_reference_TranscriptVariationAllele->peptide();
     $ga_annotation->{proteinLocation}->{alternateSequence} = $peptide;
-    $ga_annotation->{proteinLocation}->{start}      = $tv->translation_start()  - 2;
-    $ga_annotation->{proteinLocation}->{end}        = $tv->translation_end()  -1;
+    $ga_annotation->{proteinLocation}->{start}      = $tv->translation_start() - 1;
+    $ga_annotation->{proteinLocation}->{end}        = $tv->translation_end() ;
 
     ## Extract protein impact information for missense variants
     my $protein_impact = $self->protein_impact($tva); 
@@ -398,7 +417,7 @@ sub protein_impact{
   $sift_analysis->{result} = $tva->sift_prediction();
   $sift_analysis->{score}  = $tva->sift_score();
  
-  if (defined $sift_analysis->{analysisResult}){
+  if (defined $sift_analysis->{result}){
     ## TODO: define better id!
     $sift_analysis->{analysisId}    = 'SIFT.5.2.2';
     push @analysisResults , $sift_analysis;
@@ -408,7 +427,7 @@ sub protein_impact{
   $polyphen_analysis->{result} = $tva->polyphen_prediction();
   $polyphen_analysis->{score}  = $tva->polyphen_score();
 
-  if (defined $polyphen_analysis->{analysisResult}){
+  if (defined $polyphen_analysis->{result}){
     ## TODO: define better id!
     $polyphen_analysis->{analysisId}     = 'Polyphen.2.2.2_r405';
     push @analysisResults , $polyphen_analysis;
@@ -429,8 +448,9 @@ sub extractRequired{
 
   foreach my $required ( @{$req_list} ){
     $req_hash->{$required}         = 1 if $type eq 'features';
-    $req_hash->{$required->{name}} = 1 if $type eq 'SO';
+    $req_hash->{$required->{term}} = 1 if $type eq 'SO';
   }
+
   return $req_hash;
 }
 
@@ -504,6 +524,8 @@ sub searchVariantAnnotations_compliance{
  
   my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $file ) || die "Failed to get parser : $!\n";
 
+  my $keys = $parser->get_metadata_key_list();
+ 
   ## find column headers
   my $meta = $parser->get_metadata_by_pragma("INFO");
   my @headers;
@@ -532,7 +554,6 @@ sub searchVariantAnnotations_compliance{
       last;
     }
 
-    $n++;
     my $variation_hash;
     $name = $parser->get_seqname ."_". $parser->get_raw_start if $name eq "." ; ## create placeholder name 
     $variation_hash->{id}                      = $data->{variantAnnotationSetId} .":". $variantSetId .":".$name; 
@@ -558,6 +579,9 @@ sub searchVariantAnnotations_compliance{
         $annotation{$headers[$an]} = $annot[$an] if defined $annot[$an];
       }
 
+      ## check if a consequence list was specified that this consequence is required
+      next if scalar @{$data->{effects}}>0 && !exists $data->{required_effects}->{ $annotation{Annotation} } ;
+
       ## check if a feature list was specified that this feature is required
       next if scalar @{$data->{featureIds}}>0 && !exists $data->{required_features}->{ $annotation{Feature_ID} } ;
 
@@ -578,38 +602,43 @@ sub searchVariantAnnotations_compliance{
                                                     name           => $annotation{Annotation},
                                                     ontologySource => 'Sequence Ontology'
                                                   }], 
-                               hgvsAnnotation  => { genomic  => $annotation{"HGVS.g"} || undef,
-                                                    coding   => $annotation{"HGVS.c"} || undef,
-                                                    protein  => $annotation{"HGVS.p"} || undef },
+                               hgvsAnnotation  => { genomic    => $var_info->{"HGVS.g"} || undef,
+                                                    transcript => $annotation{"HGVS.c"} || undef,
+                                                    protein    => $annotation{"HGVS.p"} || undef },
                                cDNALocation    => {},
                                CDSLocation     => {},
                                proteinLocation => {},
                                analysisResults => []
                              };
 
-
-    $transcriptEffect->{cDNALocation} = { start      => $cdna_pos -1,
+    $cdna_pos-- if defined $cdna_pos; 
+    $transcriptEffect->{cDNALocation} = { start      => $cdna_pos || undef,
                                           end        => undef,
                                           referenceSequence => undef,
                                           alternateSequence => undef,
-                                        } if defined $cdna_pos;
+                                        }; 
 
-    $transcriptEffect->{CDSLocation}   = { start      => $cds_pos -1 ,
+    $cds_pos--;
+    $transcriptEffect->{CDSLocation}   = { start      => $cds_pos || undef ,
                                            end        => undef,
                                            referenceSequence => undef,
                                            alternateSequence => undef,
-                                         } if defined $cds_pos ;
+                                         } ;
 
-    $transcriptEffect->{proteinLocation} =  { start      => $aa_pos -1,
+    $aa_pos--;
+    $transcriptEffect->{proteinLocation} =  { start      => $aa_pos ||undef,
                                               end        => undef,
                                               referenceSequence => undef,
                                               alternateSequence => undef,
-                                             } if defined $aa_pos;
+                                             } ;
 
       push @{$variation_hash->{transcriptEffects}}, $transcriptEffect;
     } 
-
-    push @var_ann, $variation_hash if exists $variation_hash->{transcriptEffects}->[0];
+    ## save if not filtered out & increment batchsize
+    if ( exists $variation_hash->{transcriptEffects}->[0]){
+      $n++;
+      push @var_ann, $variation_hash;
+    }
   }
 
   $parser->close();

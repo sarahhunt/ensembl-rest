@@ -42,13 +42,14 @@ sub fetch_annotationSet {
   my $data   = shift;
 
 
-  if(defined $data->{variantSetId} &&  $data->{variantSetId} eq 11 || $data->{variantSetId} eq 10){
-
+  if(defined $data->{variantSetId} &&  $data->{variantSetId} eq 11 ){
+  
     ## hack to take from compliance files
-    my $annotationSet =  $self->fetch_compliance_set();
+    my $annotationSet =  $self->fetch_compliance_set(  $data->{variantSetId} );
     return { variantAnnotationSets => [$annotationSet],
              nextPageToken         => undef  };
-    
+print "Got compliance ann set : ";
+print Dumper $annotationSet;    
   }
   else{
     return $self->fetch_database_set($data);  
@@ -90,8 +91,13 @@ sub fetch_database_set {
   ## create analysis record
   $annotationSet->{analysis}->{info}->{Ensembl_version}  = $meta{schema_version};
 
-  $annotationSet->{analysis} =  { 'name'        => 'Ensembl',
-                                  'created'    =>   $meta{"tv.timestamp"}
+  $annotationSet->{analysis} =  { id               => $meta{schema_version},
+                                  name             => 'Ensembl',
+                                  description      => undef,
+                                  recordCreateTime => $meta{"tv.timestamp"},
+                                  recordUpdateTime => undef,
+                                  type             => undef,
+                                  software         => ['VEP']
                                   };
 
   foreach my $v_attrib (qw [polyphen_version sift_version sift_protein_db 1000genomes_version ]){
@@ -129,11 +135,13 @@ sub getAnnotationSet{
 
   my ($self, $id ) = @_; 
 
-  return $self->fetch_compliance_set() if $id =~/compliance:11/; ## hack for compliance suite
-
-  my $c = $self->context();
-  
-  my $var_ad  = $c->model('Registry')->get_DBAdaptor($species, 'variation');
+  ## hack for compliance suite
+  if ($id =~/compliance:11/){
+    my $variantSetId = (split/\:/,$id)[1] ;
+    return $self->fetch_compliance_set($variantSetId);
+  }
+ 
+  my $var_ad  = $self->context()->model('Registry')->get_DBAdaptor($species, 'variation');
   my $var_meta = $var_ad->get_MetaContainer();
   my $version = $var_meta->schema_version();
 
@@ -150,25 +158,38 @@ sub getAnnotationSet{
 sub fetch_compliance_set{
 
   my $self = shift;
+  my $variantSetId = shift;
+
+  ###MOVE to UTILS
 
   ##VCF collection object for the required set
-#  $data->{vcf_collection} =  $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($data->{variantSetId});
-#  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId"])
-#    unless defined $data->{vcf_collection}; 
+  my $vcf_collection =  $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($variantSetId);
+  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId: $variantSetId"])
+    unless defined $vcf_collection; 
 
+  ## get a chromosome to read meta data (compliance set covers only few chroms) 
+  my $chr = $vcf_collection->list_chromosomes()->[0];
 
+  my $vcf_file  = $vcf_collection->filename_template();
+  $vcf_file =~ s/\#\#\#CHR\#\#\#/$chr/;
+
+  my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $vcf_file ) || die "Failed to get parser : $!\n";
+  my $keys = $parser->get_metadata_key_list();
+  my $meta_name = $parser->get_metadata_by_pragma("name");
+  print Dumper $meta_name;
   ## HC for now - 3 available for better testing later
 
   my $annotationSet = { id            => 'compliance:11',
-                        name          => 'compliance:11',
+                        name          => 'WASH7P_annotation',
                         variantSetId  =>  11,
-                        analysis      => {  id          => 'SnpEff',
-                                            name        => 'SnpEff 4.2',
-                                            description => undef,
-                                            created     => undef,
-                                            updated     => undef,
-                                            type        => 'variant annotation',
-                                            software    =>['SnpEff'] }
+                        analysis      => {  id               => 'compliance:11',
+                                            name             => $parser->get_metadata_by_pragma("name"),
+                                            description      => $parser->get_metadata_by_pragma("description"),
+                                            recordCreateTime => $parser->get_metadata_by_pragma("created"),
+                                            recordUpdateTime => undef,
+                                            type             => 'variant annotation',
+                                            software         =>[$parser->get_metadata_by_pragma("software")] },
+                       info           => {}
                       }; 
 
   return $annotationSet;
