@@ -27,6 +27,8 @@ package EnsEMBL::REST::Model::ga4gh::genotypephenotype;
 
 use Moose;
 extends 'Catalyst::Model';
+use Catalyst::Exception;
+use Scalar::Util qw/weaken/;
 use Data::Dumper;
 
 with 'Catalyst::Component::InstancePerContext';
@@ -37,6 +39,7 @@ our $species = 'homo_sapiens';
 
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
+  weaken($c);
   return $self->new({ context => $c, %$self, @args });
 
 }
@@ -49,13 +52,13 @@ sub fetch_g2p_results {
 
   my $results;
 
-  if( defined $data->{feature}->[0]){
+  if( defined $data->{feature} && $data->{feature} ne ''){
     $results = $self->fetch_by_feature($data);
   }
-  elsif( defined $data->{phenotype}->[0]){
+  elsif( defined $data->{phenotype} && $data->{phenotype} ne ''){
     $results = $self->fetch_by_phenotype($data);
   } 
-  elsif( defined $data->{evidence}->[0]){
+  elsif( defined $data->{evidence} && $data->{evidence} ne ''){
     $results = $self->fetch_by_evidence($data);
   } 
   else{
@@ -79,13 +82,11 @@ sub fetch_by_feature{
 
   my $pheno_feat_out;
 
-  foreach my $feature ( @{$data->{feature}} ){
-    my @pfs = @{$pfa->fetch_all_by_object_id( $feature )};
+  my @pfs = @{$pfa->fetch_all_by_object_id( $data->{feature} )};
 
-    foreach my $pf (@pfs){
-      #next if defined $data->{phenotype}->[0] && $pf->phenotype()->description() !~ /$data->{phenotype}->[0]/;
-      push @$pheno_feat_out, $pf;
-    }
+  foreach my $pf (@pfs){
+    #next if defined $data->{phenotype}->[0] && $pf->phenotype()->description() !~ /$data->{phenotype}->[0]/;
+    push @$pheno_feat_out, $pf;
   }
 
   return $pheno_feat_out;
@@ -97,21 +98,10 @@ sub fetch_by_phenotype{
   my $self = shift;
   my $data = shift;
 
-  ## temp file for description <-> URI link pending db update
-
-  ## many descriptions => one id
-  my %required;
-  foreach my $uri ( @{$data->{phenotype}} ){
-    $required{$uri} = 1;
-  }
-
-  my %uri;  ##content: uri\tterm\tdesc
-  open my $temp_lookup, "/home/vagrant/src/ensembl-rest/gwas_uri_term_desc.txt " || die "Failed to file gwas_uri_desc.txt  for pheno URL :$!\n"; 
-  while(<$temp_lookup>){
-    chomp;
-    my @a = split/\t/;
-    $uri{$a[2]}  = $a[0] if $required{$a[0]} ;
-  }
+  ## read temp file for description <-> URI link pending db update
+  my $terms = read_ontology_file("ontology");
+  my $desc  = $terms->{$data->{phenotype}} ;
+  Catalyst::Exception->throw("No pheno for $data->{phenotype}") unless defined $terms->{$data->{phenotype}} ;
 
   ## to database with descriptions
   my $pfa = $self->context()->model('Registry')->get_adaptor($species, 'variation', 'PhenotypeFeature');
@@ -120,19 +110,17 @@ sub fetch_by_phenotype{
 
   my $count=0; ## only pass enough for page size - could be many
 
-  foreach my $desc (sort keys %uri ){
+  my $pfs = $pfa->fetch_all_by_phenotype_description_source_name( $desc, 'NHGRI-EBI GWAS catalog' );
 
-    my $pfs = $pfa->fetch_all_by_phenotype_description_source_name( $desc, 'NHGRI-EBI GWAS catalog' );
+  foreach my $pf (@{$pfs}){
+    last if defined $data->{pageSize} && $data->{pageSize}=~/\d+/ && $count== $data->{pageSize};
 
-   foreach my $pf (@{$pfs}){
-       last if defined $data->{pageSize} && $data->{pageSize}=~/\d+/ && $count== $data->{pageSize};
+    ## TODO filter by evidence
 
-      ## TODO filter by evidence
-
-      push @{$pheno_feat_out}, $pf;
-      $count++;
-    }
+    push @{$pheno_feat_out}, $pf;
+    $count++;
   }
+
   return $pheno_feat_out;
 
 }
@@ -150,22 +138,18 @@ sub fetch_by_evidence{
 
   my $pheno_feat_out;
 
+  my $studies = $sta->fetch_all_by_external_reference( $data->{evidence} );
 
-  foreach my $pmid (@{$data->{evidence}}){
+  unless ( defined $studies->[0] ){
+    warn "No study found for $data->{evidence}\n";
 
-    my $studies = $sta->fetch_all_by_external_reference( $pmid );
+  }
 
-    unless ( defined $studies->[0] ){
-      warn "No study found for $pmid\n";
-      next;
-    }
+  foreach my $study (@{$studies}){
+    my $pfs = $pfa->fetch_all_by_Study( $study);
+    foreach my $pf (@{$pfs}){
 
-    foreach my $study (@{$studies}){
-      my $pfs = $pfa->fetch_all_by_Study( $study);
-      foreach my $pf (@{$pfs}){
-
-        push @{$pheno_feat_out}, $pf;
-      }
+      push @{$pheno_feat_out}, $pf;
     }
   }
 
@@ -183,7 +167,7 @@ sub format_results{
   my $nextPageToken;
 
   ## hack 
-  my $ontol_info = read_ontology_file();
+  my $ontol_info = read_ontology_file('description');
 
   my @assocs;
 
@@ -337,8 +321,10 @@ sub feature_type{
 }
 
 ### FIX THIS
-## temp - build lookup hash of ontology terms prior to database'ing
+## temp - build lookup hash of desc terms prior to database'ing
 sub read_ontology_file{
+
+  my $type = shift;  ## what should be key?
 
   my %ontol_info;
   open my $lookup, "/home/vagrant/src/ensembl-rest/gwas_uri_term_desc.txt" || die "Failed to open temp_pheno_ontol.txt :$!\n";
@@ -346,8 +332,13 @@ sub read_ontology_file{
     chomp;
 
     my ($id, $term, $desc) = split/\t/; 
-    $ontol_info{"\L$desc"}{id}   = $id;
-    $ontol_info{"\L$desc"}{term} = $term;
+    if($type eq "ontology"){
+      $ontol_info{$id} = $term;
+    }
+    else{
+      $ontol_info{"\L$desc"}{id}   = $id;
+      $ontol_info{"\L$desc"}{term} = $term;
+    }
   }
 
   return \%ontol_info;
