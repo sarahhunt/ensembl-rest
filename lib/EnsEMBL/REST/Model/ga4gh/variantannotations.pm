@@ -20,12 +20,15 @@ package EnsEMBL::REST::Model::ga4gh::variantannotations;
 
 use Moose;
 extends 'Catalyst::Model';
+use Catalyst::Exception;
 
 use Bio::DB::Fasta;
 use Bio::EnsEMBL::Variation::VariationFeature;
 use Bio::EnsEMBL::Variation::DBSQL::VariationFeatureAdaptor;
+use EnsEMBL::REST::Model::ga4gh::ga4gh_utils;
 use Time::HiRes qw(gettimeofday);
 use Data::Dumper;
+use Scalar::Util qw/weaken/;
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
@@ -39,10 +42,11 @@ has 'context' => (is => 'ro');
 
 ## handle genes as well as transcripts
 
-our $species = 'homo_sapiens';
+
  
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
+  weaken($c);
   return $self->new({ context => $c, %$self, @args });
 }
 
@@ -50,6 +54,7 @@ sub searchVariantAnnotations {
  
   my ($self, $data ) = @_;
 
+  $data->{species} = $self->context->model('ga4gh::ga4gh_utils')->species();
   ## format look up lists if any specified
   $data->{required_features} = $self->extractRequired( $data->{featureIds}, 'features') if $data->{featureIds}->[0];
   $data->{required_effects}  = $self->extractRequired( $data->{effects}, 'SO' )          if $data->{effects}->[0];
@@ -58,7 +63,11 @@ sub searchVariantAnnotations {
     return $self->searchVariantAnnotations_compliance($data);
   }
   else{
-     return $self->searchVariantAnnotations_database($data);
+
+    ## extract analysis date from variation database
+    $data->{timestamp} = $self->get_timestamp();
+
+    return $self->searchVariantAnnotations_database($data);
   }
 }
 
@@ -67,9 +76,9 @@ sub searchVariantAnnotations_database {
   my ($self, $data ) = @_;
 
   ## temp set id
-  $data->{current_set} = $self->getSet();
+  $data->{current_set} = $self->getSet($data);
 
-  $self->context->go('ReturnError', 'custom', [" No annotations available for this set: " . $data->{variantAnnotationSetId} ])
+  Catalyst::Exception->throw( " No annotations available for this set: " . $data->{variantAnnotationSetId} )
     if defined $data->{variantAnnotationSetId}  && $data->{variantAnnotationSetId} ne $data->{current_set} && $data->{variantAnnotationSetId} ne 'Ensembl'; 
 
 
@@ -97,9 +106,10 @@ sub searchVariantAnnotations_by_features {
   my $nextPageToken;
 
   my $c = $self->context();
-  
-  my $tra = $c->model('Registry')->get_adaptor($species, 'Core',      'Transcript');
-  my $tva = $c->model('Registry')->get_adaptor($species, 'variation', 'TranscriptVariation');
+ 
+  my $tra = $c->model('Registry')->get_adaptor($data->{species}, 'Core',      'Transcript');
+  my $tva = $c->model('Registry')->get_adaptor($data->{species}, 'variation', 'TranscriptVariation');
+
 
 
   ## hacky paging
@@ -115,16 +125,16 @@ sub searchVariantAnnotations_by_features {
   ## extract one transcripts worth at once for paging
   ## should records be merged where transcripts overlap??
   foreach my $req_feat ( @{$data->{featureIds}} ){
-#    print "Starting to look for feature $req_feat ok_trans is $ok_trans\n";
+
     $ok_trans = 1 if defined $current_trans && $req_feat eq $current_trans;
     next unless $ok_trans == 1;
 
     ## may have no annotations if a transcript & consequence specified
-#    $self->context->go('ReturnError', 'custom', [" No annotations available for this feature type: " . $req_feat->{featureType}->{name} ])
+#    Catalyst::Exception->throw( " No annotations available for this feature type: " . $req_feat->{featureType}->{name} )
 #      unless $req_feat->{featureType}->{name} eq "transcript";
 
     my $transcript = $tra->fetch_by_stable_id( $req_feat );  
-    $c->go('ReturnError', 'custom', [" feature $req_feat not found"])
+    Catalyst::Exception->throw( " feature $req_feat not found")
       if !$transcript;
 
     my $tvs;
@@ -134,14 +144,11 @@ sub searchVariantAnnotations_by_features {
       my $constraint = " tv.consequence_types IN (";
       foreach my $cons(@cons_terms){ $constraint .= "\"$cons\",";}
       $constraint =~ s/\,$/\)/;
-      $constraint .= " and somatic = 1 ";
-
       $tvs = $tva->fetch_all_by_Transcripts_with_constraint([$transcript], $constraint );	
     }
     else{
-      $tvs = $tva->fetch_all_somatic_by_Transcripts([$transcript]);
+      $tvs = $tva->fetch_all_by_Transcripts([$transcript]);
     }
-
 
     next unless scalar(@{$tvs}) > 0; 
 
@@ -163,15 +170,17 @@ sub searchVariantAnnotations_by_features {
       my $tvas = $tv->get_all_alternate_TranscriptVariationAlleles();
       foreach my $tva(@{$tvas}) {
         my $ga_annotation  = $self->formatTVA( $tva, $tv, $data->{required_effects} ) ;
-        push @{$var_ann->{transcriptEffects}}, $ga_annotation if defined $ga_annotation->{impact};
+
+        push @{$var_ann->{transcriptEffects}}, $ga_annotation if defined $ga_annotation->{featureId};
+##
       }
-      ## don't count or store until TV available
+     ## don't count or store until TV available
       next unless exists $var_ann->{transcriptEffects};
 
       $running_total++;
       $var_ann->{variantId} = $tv->variation_feature->variation_name();
       $var_ann->{variantAnnotationSetId} = $data->{current_set};
-      $var_ann->{created} = 'FIXME_release_date';
+      $var_ann->{created} = $data->{timestamp};
 
       ## add co-located
 #      my $coLocated = $self->getColocated( $tv->variation_feature );
@@ -182,14 +191,17 @@ sub searchVariantAnnotations_by_features {
                                "1KG_minor_allele_frequency" =>  $tv->variation_feature->minor_allele_frequency()
                             };
       }
+      ## Add ClinVar summary info
+      my $clinsig = $tv->variation_feature->get_all_clinical_significance_states();
+      $var_ann->{info}->{"ClinVar_classification"} = join(",",@{$clinsig}) if defined $clinsig->[0];
+
       push @annotations, $var_ann;
     }
   }
 
 
   ## may have no annotations if a transcript & consequence specified
-  $self->context->go('ReturnError', 'custom', [" No annotations found for this query "])
-      if $running_total ==0;
+#  warn "No annotations found for this query\n"  if $running_total ==0;
 
   return ({"variant_annotation"  => \@annotations,
            "nextPageToken"       => $nextPageToken });
@@ -203,7 +215,7 @@ sub searchVariantAnnotations_by_region {
 
   my $c = $self->context(); 
 
-  my $sla = $c->model('Registry')->get_adaptor($species, 'Core',      'Slice');
+  my $sla = $c->model('Registry')->get_adaptor($data->{species}, 'Core', 'Slice');
 
   my $start = $data->{start};
   $start = $data->{pageToken} if defined $data->{pageToken};  
@@ -211,8 +223,7 @@ sub searchVariantAnnotations_by_region {
   my $location = "$data->{referenceName}\:$start\-$data->{end}";
   my $slice = $sla->fetch_by_toplevel_location($location);
 
-  $c->go('ReturnError', 'custom', ["sequence  location: $location not available in this assembly"])
-   if !$slice;
+  Catalyst::Exception->throw("sequence  location: $location not available in this assembly") if !$slice;
 
   my ($annotations, $nextPageToken) =  $self->extractVFbySlice($data, $slice);
 
@@ -233,11 +244,14 @@ sub extractVFbySlice{
 
   my @response;
 
-  my $vfa = $self->context->model('Registry')->get_adaptor($species, 'Variation', 'VariationFeature');
+  my $vfa = $self->context->model('Registry')->get_adaptor($data->{species}, 'Variation', 'VariationFeature');
   $vfa->db->include_failed_variations(0); ## don't extract multi-mapping variants
 
   my $vfs;
   if( exists $data->{required_effects}){
+##
+
+
     my @cons_terms = (keys %{$data->{required_effects} });
 
     my $constraint; 
@@ -284,10 +298,11 @@ sub fetchByVF{
   my $vf   = shift;
   my $data = shift;
 
+
   my $var_ann;
-  $var_ann->{variantId} = $vf->variation_name();
+  $var_ann->{variantId}       = $vf->variation_name();
   $var_ann->{annotationSetId} = $data->{current_set};
-  $var_ann->{created} = 'FIXME_release_date';
+  $var_ann->{created}         = $data->{timestamp};
 
 
   my $tvs =  $vf->get_all_TranscriptVariations();
@@ -317,6 +332,10 @@ sub fetchByVF{
   else{
     $var_ann->{info}  ={};
   }
+  ## Add ClinVar summary info
+  my $clinsig = $vf->get_all_clinical_significance_states();
+  $var_ann->{info}->{"ClinVar_classification"} = join(",",@{$clinsig}) if defined $clinsig->[0];
+
 
   ## add co-located
 #  my $coLocated = $self->getColocated( $vf );
@@ -336,7 +355,7 @@ sub formatTVA{
   my $ga_annotation;
 
 
-  ## get consequences & impact
+  ## get consequences 
   my $ocs = $tva->get_all_OverlapConsequences();
 
   ## consequence filter
@@ -349,12 +368,13 @@ sub formatTVA{
 
     $found_required = 1 if $effects->{$term};
     my $ontolTerm = { id             => $acc,
-                      name           => $term,
-                      ontologySource => 'Sequence Ontology'      
+                      term           => $term,
+                      sourceName     => 'Sequence Ontology',
+                      sourceVersion  => ''      
                      };
 
     push @{$ga_annotation->{effects}}, $ontolTerm;
-    $ga_annotation->{impact} = $oc->impact() ;
+#    $ga_annotation->{impact} = $oc->impact() ;
   }
 
   ## consequence filter
@@ -368,7 +388,7 @@ sub formatTVA{
   $ga_annotation->{hgvsAnnotation}->{protein}    = $tva->hgvs_protein()    || undef;
 
   $ga_annotation->{featureId} = $tv->transcript()->stable_id();
-  $ga_annotation->{id} = "id";
+  $ga_annotation->{id} = $tv->dbID(); ## do we want to do this?
 
 
   my $cdna_start = $tv->cdna_start();
@@ -460,8 +480,9 @@ sub extractRequired{
 sub getSet{
 
   my $self = shift;
+  my $data = shift;
 
-  my $var_ad   = $self->context->model('Registry')->get_DBAdaptor($species, 'variation');
+  my $var_ad   = $self->context->model('Registry')->get_DBAdaptor('homo_sapiens', 'variation');
   my $var_meta = $var_ad->get_MetaContainer();
   my $version  = $var_meta->schema_version();
 
@@ -472,13 +493,13 @@ sub getSet{
 
 ## get variants at same location
 ## add method to VFad for speed
-
+=head
 sub getColocated{
 
   my $self   = shift;
   my $vf     = shift;
 
-  my $vfa = $self->context->model('Registry')->get_adaptor($species, 'Variation', 'VariationFeature');
+  my $vfa = $self->context->model('Registry')->get_adaptor($data->{species}, 'Variation', 'VariationFeature');
 
   my @colocatedNames;
   my $featureSlice = $vf->feature_Slice;
@@ -494,6 +515,7 @@ sub getColocated{
 
   return \@colocatedNames;
 }
+=cut
 
 sub searchVariantAnnotations_compliance{
 
@@ -504,7 +526,7 @@ sub searchVariantAnnotations_compliance{
  
   ##VCF collection object for the compliance annotation set
   $data->{vcf_collection} =  $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id( $variantSetId );
-  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantAnnotationSetId"])
+  Catalyst::Exception->throw(" Failed to find the specified variantAnnotationSetId")
     unless defined $data->{vcf_collection}; 
 
   ## look up filename from vcf collection object
@@ -535,6 +557,9 @@ sub searchVariantAnnotations_compliance{
     my $headers = (split/\'/, $m->{Description})[1]; 
     @headers = split/\|/, $headers;
   }
+
+  ## need to supply SO accessions
+  my $ont_ad   = $self->context->model('Registry')->get_adaptor('Multi', 'Ontology', 'OntologyTerm');
 
   $parser->seek($data->{referenceName}, $data->{pageToken}, $data->{end});
 
@@ -567,6 +592,14 @@ sub searchVariantAnnotations_compliance{
     ## format array of transcriptEffects
     my $var_info = $parser->get_info();
 
+    ## could be multi-allelic
+    my %hgvsg;
+    my @hgvsg = split/\,/, $var_info->{"HGVS.g"};
+    my @alts  = @{$parser->get_alternatives};
+    for (my $n=0; $n < scalar @hgvsg; $n++){ 
+      $hgvsg{$alts[$n]} = $hgvsg[$n];
+    }
+
     my @effects = split/\,/, $var_info->{ANN};
     foreach my $effect (@effects){
 
@@ -594,15 +627,19 @@ sub searchVariantAnnotations_compliance{
       my ($aa_pos, $aa_length )     = split /\//, $annotation{"AA.pos / AA.length"}
         if defined $annotation{"AA.pos / AA.length"};
 
+      my $id;
+      my $ontology_terms = $ont_ad->fetch_all_by_name($annotation{Annotation}, 'SO');
+      $id = $ontology_terms->[0]->accession() if defined $ontology_terms->[0];
+
       my $transcriptEffect = { id              => "placeholder",
                                featureId       => $annotation{Feature_ID},
-                               alternateBases  => $annotation{Allele},
-                               impact          => $annotation{Annotation_Impact},
-                               effects         => [{ id             => 'PLACEHOLDER',
-                                                    name           => $annotation{Annotation},
-                                                    ontologySource => 'Sequence Ontology'
+                               alternateBases  => $annotation{Allele}, 
+                               effects         => [{ id            => $id,
+                                                    term           => $annotation{Annotation},
+                                                    sourceName     => 'Sequence Ontology',
+                                                    sourceVersion  => ''
                                                   }], 
-                               hgvsAnnotation  => { genomic    => $var_info->{"HGVS.g"} || undef,
+                               hgvsAnnotation  => { genomic    => $hgvsg{$annotation{Allele}} || undef,
                                                     transcript => $annotation{"HGVS.c"} || undef,
                                                     protein    => $annotation{"HGVS.p"} || undef },
                                cDNALocation    => {},
@@ -645,6 +682,18 @@ sub searchVariantAnnotations_compliance{
 
   return ( {"variantAnnotations"  => \@var_ann,
             "nextPageToken"       => $nextPageToken });
+}
+
+## extract analysis date from variation database
+sub get_timestamp{
+
+  my $self = shift;
+  my $var_ad   = $self->context->model('Registry')->get_DBAdaptor('homo_sapiens', 'variation');
+  my $meta_ext_sth = $var_ad->dbc->db_handle->prepare(qq[ select meta_value from meta where meta_key = 'tv.timestamp']);
+  $meta_ext_sth->execute();
+  my $timestamp = $meta_ext_sth->fetchall_arrayref();
+  return $timestamp->[0]->[0];
+
 }
 
 1;

@@ -42,11 +42,18 @@ BEGIN {extends 'Catalyst::Controller::REST'; }
 
 sub searchAnnotationSets_POST {
   my ( $self, $c ) = @_;
+
+  my $post_data = $c->req->data;
+
+  ## A variantSet id is required
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find a "variantSetId" key in your request' ] )
+    unless exists $post_data->{variantSetId}; 
+
  
   my $annotationSet;
 
   try {
-    $annotationSet = $c->model('ga4gh::annotationSets')->fetch_annotationSet( $c->req->data );
+    $annotationSet = $c->model('ga4gh::annotationSets')->fetch_annotationSet( $post_data );
   } catch {
     $c->go('ReturnError', 'from_ensembl', [$_]);
   };

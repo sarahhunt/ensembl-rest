@@ -115,5 +115,7 @@ sub fetch_all_Datasets{
   return \%collections;
 }
 
-
+sub species{
+  return 'homo_sapiens';
+}
 1;

@@ -15,21 +15,26 @@ package EnsEMBL::REST::Model::ga4gh::annotationSets;
 
 use Moose;
 extends 'Catalyst::Model';
+use Catalyst::Exception;
 use Data::Dumper;
-use Bio::EnsEMBL::Variation::Utils::VEP qw/read_cache_info get_version_data /;
+#use DateTime;
+use Scalar::Util qw/weaken/;
+
+use EnsEMBL::REST::Model::ga4gh::ga4gh_utils;
 with 'Catalyst::Component::InstancePerContext';
 
 has 'context' => (is => 'ro');
 
-our $species = 'homo_sapiens';
+
 
 sub build_per_context_instance {
   my ($self, $c, @args) = @_;
+  weaken($c);
   return $self->new({ context => $c, %$self, @args });
 }
 
 ## TO DO
-##  handle dataset
+##  handle variantset & look ups
 ##  previous releases as annotation sets
 
 ## take version info from database or VEP cache?
@@ -48,8 +53,6 @@ sub fetch_annotationSet {
     my $annotationSet =  $self->fetch_compliance_set(  $data->{variantSetId} );
     return { variantAnnotationSets => [$annotationSet],
              nextPageToken         => undef  };
-print "Got compliance ann set : ";
-print Dumper $annotationSet;    
   }
   else{
     return $self->fetch_database_set($data);  
@@ -65,6 +68,7 @@ sub fetch_database_set {
 
   my $c = $self->context();
 
+  my $species = 'homo_sapiens';
   my $core_ad = $c->model('Registry')->get_DBAdaptor($species, 'Core',    );
   my $var_ad  = $c->model('Registry')->get_DBAdaptor($species, 'variation');
 
@@ -94,8 +98,8 @@ sub fetch_database_set {
   $annotationSet->{analysis} =  { id               => $meta{schema_version},
                                   name             => 'Ensembl',
                                   description      => undef,
-                                  recordCreateTime => $meta{"tv.timestamp"},
-                                  recordUpdateTime => undef,
+                                  created          => $meta{"tv.timestamp"},
+                                  updated          => undef,
                                   type             => undef,
                                   software         => ['VEP']
                                   };
@@ -141,14 +145,14 @@ sub getAnnotationSet{
     return $self->fetch_compliance_set($variantSetId);
   }
  
-  my $var_ad  = $self->context()->model('Registry')->get_DBAdaptor($species, 'variation');
+  my $var_ad  = $self->context()->model('Registry')->get_DBAdaptor('homo_sapiens', 'variation');
   my $var_meta = $var_ad->get_MetaContainer();
   my $version = $var_meta->schema_version();
 
   my $current = "Ensembl_" . $version; 
 
   ## exit if not current
-  $self->context()->go( 'ReturnError', 'custom', [ " No data available for set $id" ] )
+  Catalyst::Exception->throw( " No data available for set $id"  )
     unless $id =~/$current/i || $id eq 'Ensembl';
 
   return $self->fetch_annotationSet();
@@ -160,11 +164,9 @@ sub fetch_compliance_set{
   my $self = shift;
   my $variantSetId = shift;
 
-  ###MOVE to UTILS
-
   ##VCF collection object for the required set
   my $vcf_collection =  $self->context->model('ga4gh::ga4gh_utils')->fetch_VCFcollection_by_id($variantSetId);
-  $self->context()->go( 'ReturnError', 'custom', [ " Failed to find the specified variantSetId: $variantSetId"])
+  Catalyst::Exception->throw( " Failed to find the specified variantSetId: $variantSetId")
     unless defined $vcf_collection; 
 
   ## get a chromosome to read meta data (compliance set covers only few chroms) 
@@ -176,8 +178,7 @@ sub fetch_compliance_set{
   my $parser = Bio::EnsEMBL::IO::Parser::VCF4Tabix->open( $vcf_file ) || die "Failed to get parser : $!\n";
   my $keys = $parser->get_metadata_key_list();
   my $meta_name = $parser->get_metadata_by_pragma("name");
-  print Dumper $meta_name;
-  ## HC for now - 3 available for better testing later
+
 
   my $annotationSet = { id            => 'compliance:11',
                         name          => 'WASH7P_annotation',
@@ -185,8 +186,8 @@ sub fetch_compliance_set{
                         analysis      => {  id               => 'compliance:11',
                                             name             => $parser->get_metadata_by_pragma("name"),
                                             description      => $parser->get_metadata_by_pragma("description"),
-                                            recordCreateTime => $parser->get_metadata_by_pragma("created"),
-                                            recordUpdateTime => undef,
+                                            created          => $parser->get_metadata_by_pragma("created"),
+                                            updated          => undef,
                                             type             => 'variant annotation',
                                             software         =>[$parser->get_metadata_by_pragma("software")] },
                        info           => {}
@@ -195,3 +196,6 @@ sub fetch_compliance_set{
   return $annotationSet;
 
 }
+
+
+1;
