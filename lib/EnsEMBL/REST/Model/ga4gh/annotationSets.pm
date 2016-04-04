@@ -85,13 +85,22 @@ sub fetch_database_set {
     $meta{$l->[0]} = $l->[1] if defined $l->[1];
   }
 
-  ## bail unless current release requested for now
-  return  { variantAnnotationSets => []} if defined $data->{variantSetId} && $data->{variantSetId} ne $meta{schema_version};
-
+  ## need better ids
   $annotationSet->{variantSetId} = $meta{schema_version};
-  ## need better id
   $annotationSet->{id}           = 'Ensembl:' . $meta{schema_version};
   $annotationSet->{name}         = 'Ensembl:' . $meta{schema_version};
+
+
+  ## bail unless current release or its alias 'Ensembl' requested for now
+  ## filter for POST endpoint
+  return  { variantAnnotationSets => []} 
+    if defined $data->{variantSetId} &&
+    $data->{variantSetId} ne 'Ensembl' && $data->{variantSetId} ne $annotationSet->{variantSetId};
+
+  ## filter for GET endpoint
+  return  { variantAnnotationSets => []}
+    if defined $data->{id} && $data->{id} ne $annotationSet->{id};
+
   ## create analysis record
   $annotationSet->{analysis}->{info}->{Ensembl_version}  = $meta{schema_version};
 
@@ -100,7 +109,7 @@ sub fetch_database_set {
                                   description      => undef,
                                   created          => $meta{"tv.timestamp"},
                                   updated          => undef,
-                                  type             => undef,
+                                  type             => 'variant annotation',
                                   software         => ['VEP']
                                   };
 
@@ -149,13 +158,15 @@ sub getAnnotationSet{
   my $var_meta = $var_ad->get_MetaContainer();
   my $version = $var_meta->schema_version();
 
-  my $current = "Ensembl_" . $version; 
+  my $current = "Ensembl:" . $version; 
 
   ## exit if not current
   Catalyst::Exception->throw( " No data available for set $id"  )
     unless $id =~/$current/i || $id eq 'Ensembl';
 
-  return $self->fetch_annotationSet();
+  my $data;
+  $data->{id} = $id;
+  return $self->fetch_database_set($data);
 
 }
 

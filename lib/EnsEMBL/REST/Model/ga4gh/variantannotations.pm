@@ -486,7 +486,7 @@ sub getSet{
   my $var_meta = $var_ad->get_MetaContainer();
   my $version  = $var_meta->schema_version();
 
-  my $set = "Ensembl_" . $version; 
+  my $set = "Ensembl:" . $version; 
 
   return $set;
 }
