@@ -103,7 +103,7 @@ sub searchFeaturesSet {
     my $exons = $self->extractExonsBySegment( $data );
     push @features, @{$exons};
   }
-
+  ## FIXME - add CDS
 
   ## sort & trim features
   my $sorted_features = sort_features(\@features);
@@ -236,7 +236,7 @@ sub getTranscriptChildren{
 
   if( exists $data->{required_types}->{exon} ){
     my $ea   = $self->context->model('Registry')->get_adaptor('homo_sapiens', 'core', 'exon');
-    my $exons = $ea->fetch_all_by_transcript( $tr);
+    my $exons = $ea->fetch_all_by_Transcript( $tr);
     foreach my $exon(@{$exons}){
       push @features, $self->formatExon($exon, $data);
     }
@@ -247,6 +247,14 @@ sub getTranscriptChildren{
     my $translation = $ta->fetch_by_Transcript( $tr );
     push @features, $self->formatProtein($translation, $data) if defined $translation;
   }
+
+  if( exists $data->{required_types}->{cds} ){
+
+    my $cdsfs = $tr->get_all_CDS();
+    foreach my $cdsf (@{$cdsfs}){
+      push @features,  $self->formatCDS($cdsf, $data); 
+    }
+   }
 
   ## NOT applying page size
   my $nextPageToken; 
@@ -305,7 +313,8 @@ sub getFeature{
   my $data;
   $data->{current_set} = $self->getSet();
 
-  return $self->getTranscript($id, $data) if $id =~/ENST/;
+#  return $self->getCDS($id, $data)        if $id =~/ENST\d+\.\d+\.\d+/;
+  return $self->getTranscript($id, $data) if $id =~/ENST\d+\.\d+/;
   return $self->getGene($id, $data)       if $id =~/ENSG/;
   return $self->getProtein($id, $data)    if $id =~/ENSP/;
   return $self->getExon($id, $data)       if $id =~/ENSE/;
@@ -472,13 +481,24 @@ sub formatTranscript{
   my $feature = $self->formatFeature($tr, $data, 'transcript');
 
   ## add relatives
-  $feature->{parentId}  = $tr->get_Gene()->stable_id_version();
-  $feature->{childIds}  = [$tr->translation()->stable_id_version()] if defined $tr->translation();
+  $feature->{parentId}  = $tr->get_Gene()->stable_id_version(); 
 
   my $ea   = $self->context->model('Registry')->get_adaptor('homo_sapiens', 'core', 'exon');
   my $exons = $ea->fetch_all_by_Transcript($tr);
   foreach my $exon(@{$exons}){
     push @{$feature->{childIds}}, $exon->stable_id_version();
+  }
+
+  if (defined $tr->translation()){
+    ## add protein feature
+    push @{$feature->{childIds}}, $tr->translation()->stable_id_version();
+
+    ## add CDS features
+    my $cdsfs = $tr->get_all_CDS();
+    foreach my $cdsf (@{$cdsfs}){
+      ### what to use as CDS region id?
+      push @{$feature->{childIds}}, $tr->stable_id_version() . "." . $cdsf->seq_region_start(); 
+    }
   }
 
   return $feature;
@@ -581,7 +601,7 @@ sub formatFeature{
 }
 
 =head2 formatProtein
-      turn ensembl translation into GA4GH feature
+      turn ensembl translation into GA4GH feature (NOT a great fit)
 =cut
 sub formatProtein{
 
@@ -616,6 +636,33 @@ sub formatProtein{
   return $gaFeature;
 }
 
+## What to use as id???
+sub formatCDS{
+
+  my $self = shift;
+  my $feat = shift;
+  my $data = shift;
+
+  my $gaFeature  = { id            => $feat->transcript()->stable_id_version() . "." . $feat->seq_region_start(),
+                     parentId      => $feat->transcript()->stable_id_version(),
+                     childIds      => [$feat->transcript()->translation()->stable_id_version()],
+                     featureSetId  => $data->{current_set},
+                     referenceName => undef,
+                     start         => $feat->seq_region_start() - 1,
+                     end           => $feat->seq_region_end(),
+                     strand        => undef
+                    };
+
+
+  ## look up ontology info if non cached
+  $data->{ontol}->{'CDS_region'} = $self->fetchSO('CDS_region')
+    unless exists $data->{ontol}->{'CDS_region'};
+
+  $gaFeature->{featureType} = $data->{ontol}->{'CDS_region'};
+
+
+  return $gaFeature;
+}
 
 
 =head2 sort_features
