@@ -76,7 +76,8 @@ sub searchVariantAnnotations_database {
   my ($self, $data ) = @_;
 
   ## temp set id
-  $data->{current_set} = $self->getSet($data);
+  $data->{current_version} = $self->getEnsemblVersion($data);
+  $data->{current_set} = 'Ensembl:' . $data->{current_version}; 
 
   Catalyst::Exception->throw( " No annotations available for this set: " . $data->{variantAnnotationSetId} )
     if defined $data->{variantAnnotationSetId}  && $data->{variantAnnotationSetId} ne $data->{current_set} && $data->{variantAnnotationSetId} ne 'Ensembl'; 
@@ -133,7 +134,8 @@ sub searchVariantAnnotations_by_features {
 #    Catalyst::Exception->throw( " No annotations available for this feature type: " . $req_feat->{featureType}->{name} )
 #      unless $req_feat->{featureType}->{name} eq "transcript";
 
-    my $transcript = $tra->fetch_by_stable_id( $req_feat );  
+    my ($stable_id, $version) = split/\./,$req_feat;
+    my $transcript = $tra->fetch_by_stable_id_version( $stable_id, $version );  
     Catalyst::Exception->throw( " feature $req_feat not found")
       if !$transcript;
 
@@ -178,7 +180,7 @@ sub searchVariantAnnotations_by_features {
       next unless exists $var_ann->{transcriptEffects};
 
       $running_total++;
-      $var_ann->{variantId} = $tv->variation_feature->variation_name();
+      $var_ann->{variantId} = $data->{current_version} .':'. $tv->variation_feature->variation_name();
       $var_ann->{variantAnnotationSetId} = $data->{current_set};
       $var_ann->{created} = $data->{timestamp};
 
@@ -300,7 +302,7 @@ sub fetchByVF{
 
 
   my $var_ann;
-  $var_ann->{variantId}       = $vf->variation_name();
+  $var_ann->{variantId}       = $data->{current_version} .':'. $vf->variation_name();
   $var_ann->{annotationSetId} = $data->{current_set};
   $var_ann->{created}         = $data->{timestamp};
 
@@ -311,7 +313,7 @@ sub fetchByVF{
   foreach my $tv (@{$tvs}){   
 
     ## check if a feature list was specified
-    next if scalar @{$data->{featureIds}}>0 && !exists $data->{required_features}->{ $tv->transcript()->stable_id()} ; 
+    next if scalar @{$data->{featureIds}}>0 && !exists $data->{required_features}->{ $tv->transcript()->stable_id_version()} ; 
 
     my $tvas = $tv->get_all_alternate_TranscriptVariationAlleles();
     foreach my $tva(@{$tvas}) {
@@ -387,7 +389,7 @@ sub formatTVA{
   $ga_annotation->{hgvsAnnotation}->{transcript} = $tva->hgvs_transcript() || undef;
   $ga_annotation->{hgvsAnnotation}->{protein}    = $tva->hgvs_protein()    || undef;
 
-  $ga_annotation->{featureId} = $tv->transcript()->stable_id();
+  $ga_annotation->{featureId} = $tv->transcript()->stable_id_version();
   $ga_annotation->{id} = $tv->dbID(); ## do we want to do this?
 
 
@@ -477,18 +479,15 @@ sub extractRequired{
 ## create temp feature set name from curent db version
 ## replace with GA4GH id when format available
 ## needs to go in a utils
-sub getSet{
+sub getEnsemblVersion{
 
   my $self = shift;
   my $data = shift;
 
   my $var_ad   = $self->context->model('Registry')->get_DBAdaptor('homo_sapiens', 'variation');
   my $var_meta = $var_ad->get_MetaContainer();
-  my $version  = $var_meta->schema_version();
 
-  my $set = "Ensembl:" . $version; 
-
-  return $set;
+  return $var_meta->schema_version() ;
 }
 
 ## get variants at same location
