@@ -218,5 +218,18 @@ sub fetch_featureSet {
 
 }
 
+sub release_version{
+
+  my $self = shift;
+
+  my $var_ad  = $self->context->model('Registry')->get_DBAdaptor('homo_sapiens', 'variation');
+
+  my $meta_ext_sth = $var_ad->dbc->db_handle->prepare(qq[ select meta_value from meta where meta_key ='schema_version']);
+  $meta_ext_sth->execute();
+  my $meta = $meta_ext_sth->fetchall_arrayref();
+
+  return $meta->[0]->[0];  
+
+}
 
 1;
