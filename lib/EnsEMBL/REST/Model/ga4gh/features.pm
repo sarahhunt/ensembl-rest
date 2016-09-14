@@ -29,10 +29,11 @@ with 'Catalyst::Component::InstancePerContext';
 has 'context' => (is => 'ro', weak_ref => 1);
 
 
-## Returning only the features required for Var Ann initially
+## Returning only the features required for Var Ann initially 
+## Plus variant for G2P.
 has 'allowed_features' => ( isa => 'HashRef', is => 'ro', lazy => 1, default => sub {
   return {
-    map { $_ => 1 } qw/gene transcript cds exon protein /
+    map { $_ => 1 } qw/gene transcript cds exon protein variant/
   };
 });
 
@@ -105,6 +106,8 @@ sub searchFeaturesSet {
   push @features, @{$self->extractExonsBySegment( $data )}
     if exists $data->{required_types}->{exons};
 
+  push @features, @{$self->extractVariantsBySegment( $data )}
+    if exists $data->{required_types}->{variant};
 
   ## sort & trim features
   my $sorted_features = sort_features(\@features);
@@ -197,6 +200,31 @@ sub extractExonsBySegment{
   }
   return \@features;
 }
+
+sub extractVariantsBySegment{
+
+  my ($self, $data ) = @_;
+
+  my @features;
+  my $count = 0;
+
+  my $vfa = $self->context->model('Registry')->get_adaptor('homo_sapiens', 'variation', 'variationfeature');
+  my $vfs = $vfa->fetch_all_by_Slice( $data->{slice} ) ;
+
+  foreach my $vf (@{$vfs}){
+
+    ## if pageSize +1 reached, return
+    last if $count == $data->{pageSize} +1 ;
+
+    my $gafeat = $self->formatVariant($vf, $data);
+    push @features,  $gafeat;
+    ## keep count for pageSize
+    $count++;
+
+  }
+  return \@features;
+}
+
 
 =head2 searchFeaturesParent
       POST search by parent id 
@@ -314,6 +342,9 @@ sub getFeature{
   return $self->getProtein($id, $data)    if $id =~/ENSP/;
   return $self->getExon($id, $data)       if $id =~/ENSE/;
 
+  ## this is needed for G2P
+  return $self->getVariant($id, $data)       if $id =~/rs/;
+
   return {};  ## not the id of a supported feature
 }
 
@@ -385,6 +416,25 @@ sub getProtein{
     unless defined $translation ;
 
   return $self->formatProtein($translation, $data) ;
+
+}
+## fix this - check release version 
+sub getVariant{
+
+  my ($self, $id, $data) = @_;
+
+  my $va   = $self->context->model('Registry')->get_adaptor('homo_sapiens', 'Variation', 'variation');
+  my $vfa  = $self->context->model('Registry')->get_adaptor('homo_sapiens', 'Variation', 'variationfeature');
+
+  my ($release_id, $name) = split/\:/, $id;
+  my $variant = $va->fetch_by_name( $name );
+  my $vf      = $vfa->fetch_all_by_Variation($variant);
+
+  Catalyst::Exception->throw(" Cannot find variant feature for id " . $id)
+    unless defined $vf->[0] ;
+
+  $data->{id} = $id;
+  return $self->formatVariant($vf->[0], $data) ;
 
 }
 
@@ -644,6 +694,38 @@ sub formatCDS{
     unless exists $data->{ontol}->{'CDS_region'};
 
   $gaFeature->{featureType} = $data->{ontol}->{'CDS_region'};
+
+
+  return $gaFeature;
+}
+
+sub formatVariant{
+
+  my $self = shift;
+  my $feat = shift;
+  my $data = shift;
+
+  my $strand;
+  $feat->seq_region_strand() eq 1 ? $strand = 'POS_STRAND'
+                                  : $strand = 'NEG_STRAND';
+
+
+  my $gaFeature  = { id            => $data->{id}, 
+                     parentId      => undef, 
+                     childIds      => [],
+                     featureSetId  => $data->{featureSet}->{id},
+                     referenceName => $feat->seq_region_name(),
+                     start         => $feat->seq_region_start() - 1,
+                     end           => $feat->seq_region_end(),
+                     strand        => $strand
+                    };
+
+
+  ## look up ontology info if non cached
+  $data->{ontol}->{'sequence_variant'} = $self->fetchSO('sequence_variant')
+    unless exists $data->{ontol}->{'sequence_variant'};
+
+  $gaFeature->{featureType} = $data->{ontol}->{'sequence_variant'};
 
 
   return $gaFeature;
