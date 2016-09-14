@@ -47,15 +47,15 @@ sub searchPhenotypeAssociationSets {
   my $data   = shift;
 
   ## only supporting one dataset currently
-  return { phenotype_association_sets   => [],
-           next_page_token => undef
+  return { phenotypeAssociationSets   => [],
+           nextPageToken => undef
          } unless $data->{datasetId} =~ /Ensembl/;  ## use ClinVar etc as database or release id? Former more robust?
 
 
   my ($phenotypeAssociationSet, $nextPageToken)  = $self->fetch_sets($data);
 
-  return { phenotype_association_sets   => $phenotypeAssociationSet,
-           next_page_token              => $nextPageToken
+  return { phenotypeAssociationSets   => $phenotypeAssociationSet,
+           nextPageToken              => $nextPageToken
          }; 
 }
 
@@ -101,7 +101,7 @@ sub fetch_sets{
 
     push @sets, { id         => $id,
                   name       => $supported_sets->{$id},
-                  dataset_id => 'Ensembl',
+                  datasetId  => 'Ensembl',
                   info       => { version =>  $source_ob->version(),
                                    url    =>  $source_ob->url()
                                  }

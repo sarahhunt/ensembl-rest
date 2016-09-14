@@ -30,13 +30,13 @@ EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 
 POST requests : /ga4gh/phenotypes/search -d
 
-{ "phenotype_association_set_id": "",
+{ "phenotypeAssociationSetId": "",
   "description": "",
   "type": {} ,
   "qualifiers": "",
-  "age_of_onset": "", 
-  "page_token":  null,
-  "page_size": 10
+  "ageOfOnset": "", 
+  "pageToken":  null,
+  "pageSize": 10
 }
 
 GET requests: /ga4gh/phenotypes/id
@@ -54,8 +54,8 @@ sub searchPhenotypes_POST {
   my $post_data = $c->req->data;
 
   ## required by spec, so check early
-  $c->go( 'ReturnError', 'custom', [ ' Cannot find "phenotype_association_set_id" key in your request' ] )
-    unless exists $post_data->{phenotype_association_set_id} ;
+  $c->go( 'ReturnError', 'custom', [ ' Cannot find "phenotypeAssociationSetId" key in your request' ] )
+    unless exists $post_data->{phenotypeAssociationSetId} ;
 
   ## set a default page size if not supplied or not a number
   $post_data->{pageSize} = 50 unless (defined  $post_data->{pageSize} && $post_data->{pageSize} =~ /\d+/ );

@@ -50,7 +50,7 @@ sub searchPhenotypes {
   my $supported_sets = $self->supported_sets();
   return { phenotypeAssociationSets   => [],
            nextPageToken => undef
-         } unless $supported_sets->{ $data->{phenotype_association_set_id} };
+         } unless $supported_sets->{ $data->{phenotypeAssociationSetId} };
 
   ## short term fix
   my $statement = (qq[ select distinct p.phenotype_id, p.description, poa.accession
@@ -89,9 +89,13 @@ sub searchPhenotypes {
 
   ## extract required meta data from core db
   my $pheno_ext_sth = $vardb_ad->dbc->db_handle->prepare( $statement) ||die;
-  $pheno_ext_sth->execute( $supported_sets->{ $data->{phenotype_association_set_id}})   ||die;
+  $pheno_ext_sth->execute( $supported_sets->{ $data->{phenotypeAssociationSetId}})   ||die;
 
   my $phenotypes = $pheno_ext_sth->fetchall_arrayref();
+
+ return { phenotypes     => \[],
+          nextPageToken  => undef
+        } unless defined $phenotypes;
 
   my $n = 0;
   my $nextPageToken;
@@ -105,6 +109,7 @@ sub searchPhenotypes {
     $done{$l->[0]} = 1;
 
     my $ont   = $ont_ad->fetch_by_accession( $l->[2] ); 
+    next unless $ont;
 
     push @phenos, { id           => $l->[0],
                     type         => { id            => $ont->accession(),
@@ -113,12 +118,13 @@ sub searchPhenotypes {
                                       sourceVersion => undef 
                                     }, 
                         qualifier    => undef,
-                        age_of_onset => undef,
+                        ageOfOnset => undef,
                         description  => $l->[1],
                         info         => {}
                       };
 
-    last if defined $data->{page_size} && $n ==  $data->{page_size} ; 
+    $n++;
+    last if defined $data->{pageSize} && $n ==  $data->{pageSize} ; 
   }
 
   return { phenotypes     => \@phenos,

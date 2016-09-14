@@ -62,16 +62,16 @@ sub fetch_g2p_results {
   my $supported_sets = $self->supported_sets();
 
   return { associations    => [],
-           next_page_token => undef} unless $supported_sets->{ $data->{phenotype_association_set_id} };
+           nextPageToken => undef} unless $supported_sets->{ $data->{phenotypeAssociationSetId} };
 
-  $data->{source} = $supported_sets->{ $data->{phenotype_association_set_id} };
+  $data->{source} = $supported_sets->{ $data->{phenotypeAssociationSetId} };
 
   my $results;
 
-  if( $data->{feature_ids} && defined $data->{feature_ids}->[0] ){
+  if( $data->{featureIds} && defined $data->{featureIds}->[0] ){
     $results = $self->fetch_by_feature($data);
   }
-  elsif( $data->{phenotype_ids} && defined $data->{phenotype_ids}->[0]){
+  elsif( $data->{phenotypeIds} && defined $data->{phenotypeIds}->[0]){
     $results = $self->fetch_by_phenotype($data);
   }
   else{
@@ -82,7 +82,7 @@ sub fetch_g2p_results {
   my ($assoc, $nextPageToken) = $self->format_results($results, $data );
 
   return{ associations    => $assoc,
-          next_page_token => $nextPageToken};
+          nextPageToken => $nextPageToken};
 }
 
 ## feature id is currently stable id eg ENSG00000176515.1 or prefixed extternal eg 85:rs6920220
@@ -91,7 +91,7 @@ sub fetch_by_feature{
   my $self = shift;
   my $data = shift; 
 
-  my $required_phenos   = $self->list_to_hash($data->{phenotype_ids});
+  my $required_phenos   = $self->list_to_hash($data->{phenotypeIds});
   my $required_evidence = $self->list_to_hash($data->{evidence});
 
   my $pfa = $self->context()->model('Registry')->get_adaptor('homo_sapiens', 'variation', 'PhenotypeFeature');
@@ -100,7 +100,7 @@ sub fetch_by_feature{
   my @pfs;
 
   ## extract all phenotype features for the required features
-  foreach my $feature_id(@{$data->{feature_ids}}){
+  foreach my $feature_id(@{$data->{featureIds}}){
     my $stable_id = $feature_id;
     $stable_id =~ s/\.\d+$//;  ## for genes
     $stable_id =~ s/^\d+\://;  ## for variants
@@ -134,7 +134,7 @@ sub fetch_by_phenotype{
   my $pfa = $self->context()->model('Registry')->get_adaptor('homo_sapiens', 'Variation', 'PhenotypeFeature');
 
   my @pfs;
-  foreach my $phenotype_id (@{$data->{phenotype_ids}}){
+  foreach my $phenotype_id (@{$data->{phenotypeIds}}){
     push @pfs, @{$pfa->fetch_all_by_phenotype_id_source_name( $phenotype_id, $data->{source} ) };
   }
 
@@ -197,7 +197,7 @@ sub format_results{
   my $count  = 0;
   my %current_versions;
 
-  my $start = (defined $data->{page_token} ? 0 : 1);
+  my $start = (defined $data->{pageToken} ? 0 : 1);
 
   my $ont_ad    = $self->context->model('Registry')->get_adaptor('Multi', 'Ontology', 'OntologyTerm');
   my $gene_ad   = $self->context->model('Registry')->get_adaptor('homo_sapiens', 'core', 'gene');
@@ -207,10 +207,10 @@ sub format_results{
   foreach my $pf( @{$pfs} ){  ## sort on seq_region + pos??
 
     ## paging
-    $start = 1 if  $start == 0 && $pf->dbID() eq $data->{page_token};
+    $start = 1 if  $start == 0 && $pf->dbID() eq $data->{pageToken};
     next unless $start == 1;
 
-    if (defined $data->{page_size} &&  $data->{page_size} eq $count){
+    if (defined $data->{pageSize} &&  $data->{pageSize} eq $count){
       $nextPageToken = $pf->dbID();
       last;
     }
@@ -226,9 +226,9 @@ sub format_results{
       }
     }
     my $assoc = { id                           => $pf->dbID(),
-                  phenotype_association_set_id => $data->{phenotype_association_set_id},
-                  feature_ids                  => [ $current_versions{$pf->object_id()}],
-                  environmental_contexts       => []
+                  phenotypeAssociationSetId => $data->{phenotype_association_set_id},
+                  featureIds                  => [ $current_versions{$pf->object_id()}],
+                  environmentalContexts       => []
                 }; 
 
     ($assoc->{evidence}, $assoc->{info}) = $self->format_attribs($pf);
@@ -240,10 +240,10 @@ sub format_results{
     my $ont_term            = $ont_ad->fetch_by_accession( $ontology_accessions->[0] );
     my $formatted_term = {};
     if (defined $ont_term ){
-      $formatted_term = { source_name    => $ont_term->ontology(),
-                          id             => $ont_term->accession(),
-                          term           => $ont_term->name(),
-                          source_version => $ont_term->ontology_version() 
+      $formatted_term = { sourceName    => $ont_term->ontology(),
+                          id            => $ont_term->accession(),
+                          term          => $ont_term->name(),
+                          sourceVersion => $ont_term->ontology_version() 
                         };
     }
 
@@ -251,7 +251,7 @@ sub format_results{
     $assoc->{phenotype} = { id           => $pf->phenotype()->dbID(),
                             type         => $formatted_term ,
                             qualifier    =>[],
-                            age_of_onset => undef,
+                            ageOfOnset => undef,
                             description  =>  $pf->phenotype()->description(),
                             info         => {}
                           };
@@ -319,10 +319,10 @@ sub format_evidence{
 
   my @vals = @_;
 
-  return { evidence_type => { source_name  => $vals[1],
-                              id           => $vals[2],
-                              term         => $vals[3],
-                              source_version => undef },
+  return { evidenceType => { sourceName  => $vals[1],
+                             id           => $vals[2],
+                             term         => $vals[3],
+                             sourceVersion => undef },
            description  => $vals[4]
          };   
 }

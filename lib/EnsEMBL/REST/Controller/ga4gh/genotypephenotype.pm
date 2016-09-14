@@ -28,14 +28,14 @@ EnsEMBL::REST->turn_on_config_serialisers(__PACKAGE__);
 
 =pod
 
-POST requests : /genotypephenotype/search -d
+POST requests : /featurephenotypeassociations/search -d
 
-{ "phenotype_association_set_id" : "ppp"
-  "feature_ids": null,
-  "phenotype_ids": null,
+{ "phenotypeAssociationSetId" : "ppp"
+  "featureIds": null,
+  "phenotypeIds": null,
   "evidence":  null, 
-  "page_token": null,
-  "page_size": 10
+  "pageToken": null,
+  "pageSize": 10
 }
 
 application/json
@@ -51,27 +51,25 @@ sub SearchFeaturesRequest_POST {
 }
 
 
-sub SearchFeaturesRequest: Chained('/') PathPart('ga4gh/genotypephenotype/search') ActionClass('REST')  {
+sub SearchFeaturesRequest: Chained('/') PathPart('ga4gh/featurephenotypeassociations/search') ActionClass('REST')  {
   my ( $self, $c ) = @_;
   my $post_data = $c->req->data;
 
-  $c->log->debug(Dumper $post_data);
-
   ## check a set is supplied
-  $c->go( 'ReturnError', 'custom', [ " A phenotype_association_set_id must be supplied "])
-    unless defined $post_data->{phenotype_association_set_id};
+  $c->go( 'ReturnError', 'custom', [ " A phenotypeAssociationSetId must be supplied "])
+    unless defined $post_data->{phenotypeAssociationSetId};
 
 
   ## check there is something to look 
   $c->go( 'ReturnError', 'custom', [ " Feature or Phenotype ids must be supplied "])
-    unless defined $post_data->{feature_ids}   ||
-           defined $post_data->{phenotype_ids};
+    unless defined $post_data->{featureIds}   ||
+           defined $post_data->{phenotypeIds};
 
 
   ## set a default page size if not supplied or not a number
-  $post_data->{page_size} = 50 unless (defined  $post_data->{page_size} &&  
-                                      $post_data->{page_size} =~ /\d+/ &&
-                                      $post_data->{page_size} >0  );
+  $post_data->{pageSize} = 50 unless (defined  $post_data->{pageSize} &&  
+                                      $post_data->{pageSize} =~ /\d+/ &&
+                                      $post_data->{pageSize} >0  );
 
   my $g2p_results;
 
